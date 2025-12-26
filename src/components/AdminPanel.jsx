@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Plus, Trash2, ArrowUp, ArrowDown, Settings, List, Shield, Trophy, Layout, Users, UserPlus, Hash, User as UserIcon, SortAsc, Lock, Unlock } from 'lucide-react';
+import { Plus, Trash2, ArrowUp, ArrowDown, Settings, List, Shield, Trophy, Layout, Users, UserPlus, Hash, User as UserIcon, SortAsc, Lock, Unlock, PenTool } from 'lucide-react';
 import useStore from '../store/useStore';
 import { clsx } from 'clsx';
 import { twMerge } from 'tailwind-merge';
@@ -16,6 +16,7 @@ const AdminPanel = () => {
         selectedCategoryId, years, addYear, updateYear, deleteYear,
         addCategory, updateCategory, deleteCategory, moveCategory, sortCategoriesByName, toggleYearLock,
         admins, addAdmin, removeAdmin, competitionName, setCompetitionName,
+        seedRandomScores, clearYearScores,
         currentUser
     } = useStore();
 
@@ -106,7 +107,6 @@ const AdminPanel = () => {
         const all = [];
         year.categories.forEach(cat => {
             const catPs = participants[cat.id] || [];
-            // Sort by participant number within category by default for consistent ordering
             const sortedCatPs = [...catPs].sort((a, b) =>
                 a.number.localeCompare(b.number, undefined, { numeric: true })
             );
@@ -115,7 +115,6 @@ const AdminPanel = () => {
             });
         });
 
-        // If sorting by 'no' (index) descending, just reverse the whole list
         if (sortConfig.field === 'no' && sortConfig.direction === 'desc') {
             return all.reverse();
         }
@@ -162,7 +161,6 @@ const AdminPanel = () => {
                 </div>
             </div>
 
-            {/* Scoring Items Tab */}
             {activeTab === 'scoring' && (
                 <div className="glass-card p-8 animate-in fade-in slide-in-from-bottom-2 duration-500">
                     <div className="flex items-center gap-2 mb-6">
@@ -199,7 +197,6 @@ const AdminPanel = () => {
                 </div>
             )}
 
-            {/* Hierarchy Management Tab */}
             {activeTab === 'hierarchy' && (
                 <div className="space-y-6">
                     <div className="glass-card p-8 animate-in fade-in slide-in-from-bottom-2 duration-500">
@@ -261,30 +258,15 @@ const AdminPanel = () => {
                                     <div className="flex justify-between items-center mb-2 px-1">
                                         <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Categories</span>
                                         <div className="flex gap-2">
-                                            <button
-                                                onClick={() => sortCategoriesByName(year.id, 'asc')}
-                                                className="flex items-center gap-1 text-[10px] font-black text-indigo-400 hover:text-white transition-colors"
-                                            >
-                                                <SortAsc size={10} /> A-Z
-                                            </button>
-                                            <button
-                                                onClick={() => sortCategoriesByName(year.id, 'desc')}
-                                                className="flex items-center gap-1 text-[10px] font-black text-rose-400 hover:text-white transition-colors"
-                                            >
-                                                <SortAsc size={10} className="rotate-180" /> Z-A
-                                            </button>
+                                            <button onClick={() => sortCategoriesByName(year.id, 'asc')} className="flex items-center gap-1 text-[10px] font-black text-indigo-400 hover:text-white transition-colors"><SortAsc size={10} /> A-Z</button>
+                                            <button onClick={() => sortCategoriesByName(year.id, 'desc')} className="flex items-center gap-1 text-[10px] font-black text-rose-400 hover:text-white transition-colors"><SortAsc size={10} className="rotate-180" /> Z-A</button>
                                         </div>
                                     </div>
                                     {[...(year.categories || [])].sort((a, b) => (a.order || 0) - (b.order || 0)).map((cat, index, arr) => (
                                         <div key={cat.id} className="flex items-center justify-between bg-white/5 p-3 rounded-lg group hover:bg-white/10 transition-all">
                                             {editingCatId === cat.id ? (
                                                 <div className="flex gap-2 w-full">
-                                                    <input
-                                                        className="bg-black/60 border border-white/20 rounded px-2 py-1 text-white text-sm w-full outline-none focus:border-indigo-500"
-                                                        value={editValue}
-                                                        onChange={(e) => setEditValue(e.target.value)}
-                                                        autoFocus
-                                                    />
+                                                    <input className="bg-black/60 border border-white/20 rounded px-2 py-1 text-white text-sm w-full outline-none focus:border-indigo-500" value={editValue} onChange={(e) => setEditValue(e.target.value)} autoFocus />
                                                     <button onClick={() => { updateCategory(year.id, cat.id, editValue); setEditingCatId(null); }} className="text-[10px] bg-emerald-600 px-2 py-1 rounded">저장</button>
                                                     <button onClick={() => setEditingCatId(null)} className="text-[10px] bg-slate-600 px-2 py-1 rounded">취소</button>
                                                 </div>
@@ -306,18 +288,7 @@ const AdminPanel = () => {
                                         </div>
                                     ))}
                                     <div className="pt-2">
-                                        <div className="flex gap-2">
-                                            <input
-                                                className="bg-black/40 border border-white/10 rounded-lg px-3 py-2 text-xs text-white w-full"
-                                                placeholder="새 종목 추가..."
-                                                onKeyDown={(e) => {
-                                                    if (e.key === 'Enter' && e.target.value) {
-                                                        addCategory(year.id, e.target.value);
-                                                        e.target.value = '';
-                                                    }
-                                                }}
-                                            />
-                                        </div>
+                                        <input className="bg-black/40 border border-white/10 rounded-lg px-3 py-2 text-xs text-white w-full" placeholder="새 종목 추가..." onKeyDown={(e) => { if (e.key === 'Enter' && e.target.value) { addCategory(year.id, e.target.value); e.target.value = ''; } }} />
                                     </div>
                                 </div>
                             </div>
@@ -326,7 +297,6 @@ const AdminPanel = () => {
                 </div>
             )}
 
-            {/* Participants Tab */}
             {activeTab === 'participants' && (
                 <div className="glass-card p-8 animate-in fade-in slide-in-from-bottom-2 duration-500">
                     <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-8">
@@ -335,27 +305,13 @@ const AdminPanel = () => {
                             <h2 className="text-xl font-bold text-white">참가자 명단 관리</h2>
                         </div>
                         <div className="flex flex-col sm:flex-row gap-2">
-                            <select
-                                value={manageYearId}
-                                onChange={(e) => {
-                                    setManageYearId(e.target.value);
-                                    setManageCatId(''); // Reset category when year changes
-                                }}
-                                className="bg-black/40 border border-white/10 rounded-xl px-4 py-2 text-white text-xs outline-none"
-                            >
+                            <select value={manageYearId} onChange={(e) => { setManageYearId(e.target.value); setManageCatId(''); }} className="bg-black/40 border border-white/10 rounded-xl px-4 py-2 text-white text-xs outline-none">
                                 <option value="">대회 연도 선택</option>
                                 {years.map(y => <option key={y.id} value={y.id}>{y.name}</option>)}
                             </select>
-                            <select
-                                value={manageCatId}
-                                onChange={(e) => setManageCatId(e.target.value)}
-                                disabled={!manageYearId}
-                                className="bg-black/40 border border-white/10 rounded-xl px-4 py-2 text-white text-xs outline-none disabled:opacity-30"
-                            >
+                            <select value={manageCatId} onChange={(e) => setManageCatId(e.target.value)} disabled={!manageYearId} className="bg-black/40 border border-white/10 rounded-xl px-4 py-2 text-white text-xs outline-none disabled:opacity-30">
                                 <option value="">종목 선택</option>
-                                {years.find(y => y.id === manageYearId)?.categories.map(c => (
-                                    <option key={c.id} value={c.id}>{c.name}</option>
-                                ))}
+                                {years.find(y => y.id === manageYearId)?.categories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
                             </select>
                         </div>
                     </div>
@@ -364,16 +320,12 @@ const AdminPanel = () => {
                         <>
                             <form onSubmit={handleAddParticipant} className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">
                                 <div className="flex items-center gap-2 bg-black/40 border border-white/10 rounded-xl px-4 py-3">
-                                    <Hash size={16} className="text-slate-500" />
-                                    <input type="text" value={newPNumber} onChange={(e) => setNewPNumber(e.target.value)} placeholder="참가번호 (Back No.)" className="w-full bg-transparent outline-none text-white font-bold" />
+                                    <Hash size={16} className="text-slate-500" /><input type="text" value={newPNumber} onChange={(e) => setNewPNumber(e.target.value)} placeholder="참가번호 (Back No.)" className="w-full bg-transparent outline-none text-white font-bold" />
                                 </div>
                                 <div className="flex items-center gap-2 bg-black/40 border border-white/10 rounded-xl px-4 py-3">
-                                    <UserIcon size={16} className="text-slate-500" />
-                                    <input type="text" value={newPName} onChange={(e) => setNewPName(e.target.value)} placeholder="참가팀 이름" className="w-full bg-transparent outline-none text-white font-bold" />
+                                    <UserIcon size={16} className="text-slate-500" /><input type="text" value={newPName} onChange={(e) => setNewPName(e.target.value)} placeholder="참가팀 이름" className="w-full bg-transparent outline-none text-white font-bold" />
                                 </div>
-                                <button type="submit" className="bg-emerald-600 hover:bg-emerald-500 text-white py-3 rounded-xl font-bold flex items-center justify-center gap-2 transition-all hover:scale-[1.02]">
-                                    <UserPlus size={20} /> 참가자 등록
-                                </button>
+                                <button type="submit" className="bg-emerald-600 hover:bg-emerald-500 text-white py-3 rounded-xl font-bold flex items-center justify-center gap-2 transition-all hover:scale-[1.02]"><UserPlus size={20} /> 참가자 등록</button>
                             </form>
                             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
                                 {(participants[manageCatId] || []).map(p => (
@@ -401,9 +353,6 @@ const AdminPanel = () => {
                                         )}
                                     </div>
                                 ))}
-                                {(participants[manageCatId] || []).length === 0 && (
-                                    <div className="col-span-full py-12 text-center text-slate-500 italic border border-dashed border-white/10 rounded-xl">이 종목에 등록된 참가자가 없습니다.</div>
-                                )}
                             </div>
                         </>
                     ) : (
@@ -417,19 +366,9 @@ const AdminPanel = () => {
                         <div className="mt-12 pt-8 border-t border-white/10">
                             <div className="flex items-center gap-3 mb-6">
                                 <Layout className="text-indigo-400" />
-                                <h3 className="text-lg font-bold text-white">{years.find(y => y.id === manageYearId)?.name}년 전체 참가자 현황</h3>
-                                <span className="bg-indigo-500/20 text-indigo-400 text-[10px] font-black px-2 py-0.5 rounded-full">
-                                    총 {yearAllParticipants.length}개 팀
-                                </span>
+                                <h3 className="text-lg font-bold text-white uppercase">{years.find(y => y.id === manageYearId)?.name}년 전체 참가자 현황</h3>
+                                <span className="bg-indigo-500/20 text-indigo-400 text-[10px] font-black px-2 py-0.5 rounded-full">총 {yearAllParticipants.length}개 팀</span>
                             </div>
-
-                            <div className="flex flex-wrap items-center gap-4 mb-4 bg-white/5 p-4 rounded-xl">
-                                <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Sort:</span>
-                                <button onClick={handleSort} className={cn("flex items-center gap-1 text-xs font-bold px-3 py-1.5 rounded-lg transition-all", sortConfig.field === 'no' ? "bg-indigo-600 text-white" : "bg-black/20 text-slate-400 hover:text-white")}>
-                                    <Hash size={12} /> No. {sortConfig.field === 'no' && (sortConfig.direction === 'asc' ? '▲' : '▼')}
-                                </button>
-                            </div>
-
                             <div className="overflow-hidden rounded-xl border border-white/5 bg-black/20">
                                 <table className="w-full text-left border-collapse">
                                     <thead>
@@ -442,88 +381,20 @@ const AdminPanel = () => {
                                         </tr>
                                     </thead>
                                     <tbody className="divide-y divide-white/5">
-                                        {yearAllParticipants.map((p, index) => {
-                                            const isNewCategory = index > 0 && p.categoryName !== yearAllParticipants[index - 1].categoryName;
-                                            const currentYear = years.find(y => y.id === manageYearId);
-                                            const catIndex = currentYear ? currentYear.categories.findIndex(c => c.id === p.categoryId) : 0;
-                                            const PASTEL_COLORS = [
-                                                'text-rose-400', 'text-orange-400', 'text-amber-400', 'text-emerald-400',
-                                                'text-cyan-400', 'text-blue-400', 'text-violet-400', 'text-fuchsia-400'
-                                            ];
-                                            const colorClass = PASTEL_COLORS[catIndex % PASTEL_COLORS.length] || 'text-white';
-
-                                            return (
-                                                <React.Fragment key={`${p.categoryId}_${p.id}`}>
-                                                    {isNewCategory && (
-                                                        <tr>
-                                                            <td colSpan={5} className="py-0">
-                                                                <div className="h-0.5 w-full bg-indigo-500/30 my-1"></div>
-                                                            </td>
-                                                        </tr>
-                                                    )}
-                                                    <tr className="hover:bg-white/[0.02] transition-colors group">
-                                                        <td className="px-6 py-5 text-center font-black text-slate-600">
-                                                            {sortConfig.direction === 'asc' ? index + 1 : yearAllParticipants.length - index}
-                                                        </td>
-                                                        {editingPId === p.id ? (
-                                                            <>
-                                                                <td className="px-6 py-4">
-                                                                    <input
-                                                                        className="bg-black/60 border border-white/20 rounded px-2 py-1 text-white text-lg font-bold w-full font-mono outline-none focus:border-indigo-500"
-                                                                        value={editPNumber}
-                                                                        onChange={(e) => setEditPNumber(e.target.value)}
-                                                                        autoFocus
-                                                                    />
-                                                                </td>
-                                                                <td className="px-6 py-4">
-                                                                    <input
-                                                                        className="bg-black/60 border border-white/20 rounded px-2 py-1 text-white text-lg font-bold w-full outline-none focus:border-indigo-500"
-                                                                        value={editPName}
-                                                                        onChange={(e) => setEditPName(e.target.value)}
-                                                                    />
-                                                                </td>
-                                                                <td className="px-6 py-5">
-                                                                    <span className="text-xs bg-white/5 px-3 py-1.5 rounded-lg text-slate-300 font-bold uppercase tracking-tight">
-                                                                        {p.categoryName}
-                                                                    </span>
-                                                                </td>
-                                                                <td className="px-6 py-4 text-center">
-                                                                    <div className="flex items-center justify-center gap-2">
-                                                                        <button onClick={() => { updateParticipant(p.categoryId, p.id, { number: editPNumber, name: editPName }); setEditingPId(null); }} className="text-[10px] bg-emerald-600 hover:bg-emerald-500 text-white px-2 py-1 rounded font-bold">저장</button>
-                                                                        <button onClick={() => setEditingPId(null)} className="text-[10px] bg-slate-600 hover:bg-slate-500 text-white px-2 py-1 rounded font-bold">취소</button>
-                                                                    </div>
-                                                                </td>
-                                                            </>
-                                                        ) : (
-                                                            <>
-                                                                <td className={cn("px-6 py-5 font-mono font-bold text-lg", colorClass)}>{p.number}</td>
-                                                                <td className={cn("px-6 py-5 font-bold text-lg", colorClass)}>{p.name}</td>
-                                                                <td className="px-6 py-5">
-                                                                    <span className={cn("text-xs bg-white/5 px-3 py-1.5 rounded-lg font-bold uppercase tracking-tight", colorClass)}>
-                                                                        {p.categoryName}
-                                                                    </span>
-                                                                </td>
-                                                                <td className="px-6 py-5 text-center">
-                                                                    <div className="flex items-center justify-center gap-2 opacity-0 group-hover:opacity-100 transition-all">
-                                                                        <button onClick={() => { setEditingPId(p.id); setEditPNumber(p.number); setEditPName(p.name); }} className="p-2 hover:bg-white/10 rounded-lg text-slate-400 hover:text-indigo-400 transition-colors">
-                                                                            <Settings size={16} />
-                                                                        </button>
-                                                                        <button onClick={() => { if (confirm('이 참가자를 삭제하시겠습니까? (No.는 자동으로 재정렬됩니다)')) removeParticipant(p.categoryId, p.id); }} className="p-2 hover:bg-rose-500/10 rounded-lg text-rose-400/60 hover:text-rose-400 transition-colors">
-                                                                            <Trash2 size={16} />
-                                                                        </button>
-                                                                    </div>
-                                                                </td>
-                                                            </>
-                                                        )}
-                                                    </tr>
-                                                </React.Fragment>
-                                            );
-                                        })}
-                                        {yearAllParticipants.length === 0 && (
-                                            <tr>
-                                                <td colSpan={5} className="px-8 py-16 text-center text-slate-500 italic text-lg">표시할 참가자가 없습니다.</td>
+                                        {yearAllParticipants.map((p, index) => (
+                                            <tr key={`${p.categoryId}_${p.id}`} className="hover:bg-white/[0.02] transition-colors group">
+                                                <td className="px-6 py-5 text-center font-black text-slate-600">{index + 1}</td>
+                                                <td className="px-6 py-5 font-mono font-bold text-lg text-white">{p.number}</td>
+                                                <td className="px-6 py-5 font-bold text-lg text-white">{p.name}</td>
+                                                <td className="px-6 py-5"><span className="text-xs bg-white/5 px-3 py-1.5 rounded-lg text-slate-300 font-bold uppercase tracking-tight">{p.categoryName}</span></td>
+                                                <td className="px-6 py-5 text-center">
+                                                    <div className="flex items-center justify-center gap-2 opacity-0 group-hover:opacity-100 transition-all">
+                                                        <button onClick={() => { setEditingPId(p.id); setEditPNumber(p.number); setEditPName(p.name); }} className="p-2 hover:bg-white/10 rounded-lg text-slate-400"><Settings size={16} /></button>
+                                                        <button onClick={() => removeParticipant(p.categoryId, p.id)} className="p-2 hover:bg-rose-500/20 rounded-lg text-rose-400"><Trash2 size={16} /></button>
+                                                    </div>
+                                                </td>
                                             </tr>
-                                        )}
+                                        ))}
                                     </tbody>
                                 </table>
                             </div>
@@ -532,7 +403,6 @@ const AdminPanel = () => {
                 </div>
             )}
 
-            {/* Judges Tab */}
             {activeTab === 'judges' && (
                 <div className="glass-card p-8 animate-in fade-in slide-in-from-bottom-2 duration-500">
                     <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-8">
@@ -540,11 +410,7 @@ const AdminPanel = () => {
                             <Shield className="text-amber-400" />
                             <h2 className="text-xl font-bold text-white">심사위원 보안 관리</h2>
                         </div>
-                        <select
-                            value={manageYearId}
-                            onChange={(e) => setManageYearId(e.target.value)}
-                            className="bg-black/40 border border-white/10 rounded-xl px-4 py-2 text-white text-xs outline-none"
-                        >
+                        <select value={manageYearId} onChange={(e) => setManageYearId(e.target.value)} className="bg-black/40 border border-white/10 rounded-xl px-4 py-2 text-white text-xs outline-none">
                             <option value="">대회 연도 선택</option>
                             {years.map(y => <option key={y.id} value={y.id}>{y.name}</option>)}
                         </select>
@@ -553,28 +419,20 @@ const AdminPanel = () => {
                     {manageYearId ? (
                         <>
                             <form onSubmit={handleAddJudge} className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">
-                                <input type="email" value={newJudgeEmail} onChange={(e) => setNewJudgeEmail(e.target.value)} placeholder="구글 이메일 (judge@gmail.com)" className="bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-white outline-none" />
+                                <input type="email" value={newJudgeEmail} onChange={(e) => setNewJudgeEmail(e.target.value)} placeholder="구글 이메일" className="bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-white outline-none" />
                                 <input type="text" value={newJudgeName} onChange={(e) => setNewJudgeName(e.target.value)} placeholder="심사위원 이름" className="bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-white outline-none" />
-                                <button type="submit" className="bg-amber-600 hover:bg-amber-500 text-white py-3 rounded-xl font-bold flex items-center justify-center gap-2 transition-all hover:scale-[1.02]">
-                                    <Shield size={20} /> 권한 부여
-                                </button>
+                                <button type="submit" className="bg-amber-600 hover:bg-amber-500 text-white py-3 rounded-xl font-bold flex items-center justify-center gap-2 transition-all hover:scale-[1.02]"><Shield size={20} /> 권한 부여</button>
                             </form>
                             <div className="space-y-3">
                                 {(judgesByYear[manageYearId] || []).map(j => (
                                     <div key={j.email} className="flex items-center justify-between p-4 bg-white/5 border border-white/10 rounded-xl group">
                                         <div className="flex items-center gap-4">
                                             <div className="w-10 h-10 rounded-full bg-amber-500/20 text-amber-500 flex items-center justify-center"><Shield size={20} /></div>
-                                            <div>
-                                                <p className="font-bold text-white">{j.name}</p>
-                                                <p className="text-xs text-slate-500">{j.email}</p>
-                                            </div>
+                                            <div><p className="font-bold text-white">{j.name}</p><p className="text-xs text-slate-500">{j.email}</p></div>
                                         </div>
                                         <button onClick={() => removeJudge(manageYearId, j.email)} className="p-2 opacity-0 group-hover:opacity-100 hover:bg-rose-500/20 rounded-lg text-rose-400 transition-all"><Trash2 size={18} /></button>
                                     </div>
                                 ))}
-                                {(judgesByYear[manageYearId] || []).length === 0 && (
-                                    <div className="py-12 text-center text-slate-500 italic border border-dashed border-white/10 rounded-xl">등록된 외부 권한자가 없습니다.</div>
-                                )}
                             </div>
                         </>
                     ) : (
@@ -586,7 +444,6 @@ const AdminPanel = () => {
                 </div>
             )}
 
-            {/* General Settings Tab */}
             {activeTab === 'settings' && (
                 <div className="space-y-6">
                     <div className="glass-card p-8 animate-in fade-in slide-in-from-bottom-2 duration-500">
@@ -597,66 +454,76 @@ const AdminPanel = () => {
                         <div className="space-y-4">
                             <div>
                                 <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest block mb-2 px-1">대회 공식 명칭</label>
-                                <div className="flex gap-4">
-                                    <input
-                                        type="text"
-                                        value={competitionName}
-                                        onChange={(e) => setCompetitionName(e.target.value)}
-                                        className="flex-1 bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-white outline-none"
-                                    />
-                                </div>
+                                <input type="text" value={competitionName} onChange={(e) => setCompetitionName(e.target.value)} className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-white outline-none" />
+                            </div>
+                        </div>
+                    </div>
+
+                    <div className="glass-card p-8 animate-in fade-in slide-in-from-bottom-2 duration-500 bg-amber-500/5 border-amber-500/20">
+                        <div className="flex items-center gap-2 mb-6">
+                            <PenTool className="text-amber-400" />
+                            <h2 className="text-xl font-bold text-white">테스트 데이터 도구 (Developer)</h2>
+                        </div>
+                        <div className="space-y-4">
+                            <p className="text-xs text-slate-400">2025년 종목들에 대해 가상의 심사위원 3명의 점수를 자동으로 생성하거나 초기화합니다.</p>
+                            <div className="flex gap-4">
+                                <button
+                                    onClick={async () => {
+                                        if (confirm('2025년 모든 종목에 랜덤 점수를 생성하시겠습니까? (수 초 소요될 수 있습니다)')) {
+                                            await seedRandomScores('2025');
+                                            alert('2025년 데이터 생성이 완료되었습니다.');
+                                        }
+                                    }}
+                                    className="bg-amber-600 hover:bg-amber-500 text-white px-6 py-3 rounded-xl font-bold transition-all"
+                                >
+                                    2025년 랜덤 데이터 채우기
+                                </button>
+                                <button
+                                    onClick={async () => {
+                                        if (confirm('2025년의 모든 점수 데이터를 삭제하시겠습니까?')) {
+                                            await clearYearScores('2025');
+                                            alert('2025년 데이터가 초기화되었습니다.');
+                                        }
+                                    }}
+                                    className="bg-white/5 border border-white/10 hover:bg-rose-500/20 hover:border-rose-500/50 text-slate-400 hover:text-rose-400 px-6 py-3 rounded-xl font-bold transition-all"
+                                >
+                                    2025년 점수 초기화
+                                </button>
                             </div>
                         </div>
                     </div>
                 </div>
             )}
 
-            {/* Root Admin Management Tab */}
             {activeTab === 'admins' && currentUser?.role === 'ROOT_ADMIN' && (
                 <div className="glass-card p-8 animate-in fade-in slide-in-from-bottom-2 duration-500">
                     <div className="flex items-center gap-2 mb-6">
                         <Shield className="text-rose-400" />
                         <h2 className="text-xl font-bold text-white">최고 관리자(Admin) 권한 관리</h2>
                     </div>
-                    <div className="p-4 bg-rose-500/10 border border-rose-500/20 rounded-xl mb-8">
-                        <p className="text-xs text-rose-200 font-bold flex items-center gap-2">
-                            <Lock size={12} /> Root Admin Area: 이곳에서 추가된 관리자는 모든 설정에 접근할 수 있습니다 (이 메뉴 제외).
-                        </p>
-                    </div>
                     <form
                         onSubmit={(e) => {
                             e.preventDefault();
                             const email = e.target.email.value;
                             const name = e.target.name.value;
-                            if (email && name) {
-                                addAdmin(email, name);
-                                e.target.reset();
-                            }
+                            if (email && name) { addAdmin(email, name); e.target.reset(); }
                         }}
                         className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8"
                     >
                         <input name="email" type="email" placeholder="관리자 구글 이메일" required className="bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-white outline-none" />
                         <input name="name" type="text" placeholder="관리자 이름" required className="bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-white outline-none" />
-                        <button type="submit" className="bg-rose-600 hover:bg-rose-500 text-white py-3 rounded-xl font-bold flex items-center justify-center gap-2 transition-all hover:scale-[1.02]">
-                            <Plus size={20} /> 관리자 등록
-                        </button>
+                        <button type="submit" className="bg-rose-600 hover:bg-rose-500 text-white py-3 rounded-xl font-bold flex items-center justify-center gap-2 transition-all hover:scale-[1.02]"><Plus size={20} /> 관리자 등록</button>
                     </form>
                     <div className="space-y-3">
                         {admins.map(admin => (
                             <div key={admin.email} className="flex items-center justify-between p-4 bg-white/5 border border-white/10 rounded-xl group">
                                 <div className="flex items-center gap-4">
                                     <div className="w-10 h-10 rounded-xl bg-rose-500/20 text-rose-400 flex items-center justify-center"><Shield size={20} /></div>
-                                    <div>
-                                        <p className="font-bold text-white">{admin.name}</p>
-                                        <p className="text-xs text-slate-500">{admin.email}</p>
-                                    </div>
+                                    <div><p className="font-bold text-white">{admin.name}</p><p className="text-xs text-slate-500">{admin.email}</p></div>
                                 </div>
                                 <button onClick={() => removeAdmin(admin.email)} className="p-2 opacity-0 group-hover:opacity-100 hover:bg-rose-500/20 rounded-lg text-rose-400 transition-all"><Trash2 size={18} /></button>
                             </div>
                         ))}
-                        <div className="p-4 bg-indigo-500/5 border border-indigo-500/20 rounded-xl">
-                            <p className="text-[10px] text-indigo-300 italic">* 최초 Root 관리자는 삭제할 수 없습니다.</p>
-                        </div>
                     </div>
                 </div>
             )}

@@ -1,6 +1,12 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
-import { PenTool, Lock, Save, AlertCircle, Medal } from 'lucide-react';
+import { PenTool, Lock, Save, AlertCircle, Medal, Users } from 'lucide-react';
 import useStore from '../store/useStore';
+import { clsx } from 'clsx';
+import { twMerge } from 'tailwind-merge';
+
+function cn(...inputs) {
+    return twMerge(clsx(inputs));
+}
 
 const Scorer = () => {
     const { scoringItems, updateScore, selectedCategoryId, scores, participants, currentUser, years, judgesByYear } = useStore();
@@ -19,11 +25,12 @@ const Scorer = () => {
     // Auth & Lock logic
     const isYearLocked = currentYear?.locked;
     const isAdmin = currentUser?.role === 'ADMIN' || currentUser?.role === 'ROOT_ADMIN';
+    const isJudge = currentUser?.role === 'JUDGE';
     const isJudgeForThisYear = judgesByYear[currentYearId]?.some(j => j.email === currentUser?.email);
 
     // Auth: Everyone can view, but only Admin/Assigned Judge can edit
     const isAuthorized = true;
-    const canEdit = isAdmin || isJudgeForThisYear;
+    const canEdit = isAdmin || isJudge;
     const isLocked = (isYearLocked && !isAdmin) || !canEdit;
 
     // Initialize local scores from store
@@ -97,34 +104,80 @@ const Scorer = () => {
 
     // Calculate Rankings
     const topRanked = useMemo(() => {
-        const withScores = sortedParticipants.map(p => ({
-            ...p,
-            total: parseFloat(calculateTotal(p.id))
-        })).filter(p => p.total > 0);
+        const withScores = sortedParticipants.map(p => {
+            let totalVal = 0;
+            if (isAdmin) {
+                // For admin, use average of all judges
+                const pScoresByJudge = scores[selectedCategoryId]?.[p.id] || {};
+                const judgeEmails = Object.keys(pScoresByJudge);
+                if (judgeEmails.length > 0) {
+                    let sumOfTotals = 0;
+                    judgeEmails.forEach(email => {
+                        const vals = pScoresByJudge[email] || {};
+                        const judgeTotal = Object.values(vals).reduce((s, v) => s + (parseFloat(v) || 0), 0);
+                        sumOfTotals += judgeTotal;
+                    });
+                    totalVal = sumOfTotals / judgeEmails.length;
+                }
+            } else {
+                totalVal = parseFloat(calculateTotal(p.id));
+            }
+            return { ...p, total: parseFloat(totalVal.toFixed(1)) };
+        }).filter(p => p.total > 0);
 
         return withScores.sort((a, b) => b.total - a.total).slice(0, 3);
-    }, [sortedParticipants, calculateTotal]);
+    }, [sortedParticipants, calculateTotal, isAdmin, scores, selectedCategoryId]);
 
-    if (!selectedCategoryId) {
-        return (
-            <div className="min-h-[60vh] flex flex-col items-center justify-center text-center p-10 fade-in">
-                <div className="w-24 h-24 rounded-full bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center mb-8 shadow-2xl shadow-indigo-500/30 animate-pulse">
-                    <PenTool className="text-white w-10 h-10" />
-                </div>
-                <h1 className="text-3xl md:text-5xl font-black text-white mb-6 uppercase tracking-tight leading-tight">
-                    공정한 심사로<br />
-                    <span className="text-transparent bg-clip-text bg-gradient-to-r from-indigo-400 to-purple-400">댄서들의 꿈</span>을<br />
-                    이루게 해주세요.
-                </h1>
-            </div>
-        );
-    }
+    // Helper for Admin View
+    const getAdminItemStats = (pId, itemId) => {
+        const pScoresByJudge = scores[selectedCategoryId]?.[pId] || {};
+        const judgeEmails = Object.keys(pScoresByJudge);
+        const stats = { avg: 0, breakdown: [] };
+
+        if (judgeEmails.length === 0) return stats;
+
+        let sum = 0;
+        let count = 0;
+        judgeEmails.forEach(email => {
+            const val = pScoresByJudge[email]?.[itemId];
+            if (val !== undefined) {
+                const num = parseFloat(val);
+                sum += num;
+                count++;
+
+                // Find judge name
+                let judgeName = email.split('@')[0];
+                for (const yearId in judgesByYear) {
+                    const found = judgesByYear[yearId].find(j => j.email === email);
+                    if (found) {
+                        judgeName = found.name;
+                        break;
+                    }
+                }
+                stats.breakdown.push({ name: judgeName, score: num });
+            }
+        });
+
+        if (count > 0) stats.avg = sum / count;
+        return stats;
+    };
 
     if (!isAuthorized) {
         return (
             <div className="max-w-5xl mx-auto py-20 flex flex-col items-center justify-center text-center p-10 glass-card border-dashed border-2 border-slate-700">
                 <Lock size={48} className="mb-4 text-rose-500 opacity-50" />
                 <h2 className="text-2xl font-bold text-white mb-2">접근 권한이 없습니다</h2>
+            </div>
+        );
+    }
+
+    if (!selectedCategoryId) {
+        return (
+            <div className="max-w-screen-xl mx-auto pb-20 px-4">
+                <div className="min-h-[60vh] flex flex-col items-center justify-center text-center p-10 border-2 border-dashed border-white/5 rounded-3xl">
+                    <PenTool className="text-slate-700 w-12 h-12 mb-4" />
+                    <p className="text-slate-500 font-bold uppercase tracking-widest text-sm">좌측 메뉴에서 심사할 종목을 선택해 주세요.</p>
+                </div>
             </div>
         );
     }
@@ -226,14 +279,32 @@ const Scorer = () => {
                                 </tr>
                             ) : (
                                 sortedParticipants.map((p) => {
-                                    const total = calculateTotal(p.id);
+                                    let displayTotal = 0;
+                                    if (isAdmin) {
+                                        // Calculate average of all judges for this participant
+                                        const pScoresByJudge = scores[selectedCategoryId]?.[p.id] || {};
+                                        const judgeEmails = Object.keys(pScoresByJudge);
+                                        if (judgeEmails.length > 0) {
+                                            let sumOfTotals = 0;
+                                            judgeEmails.forEach(email => {
+                                                const vals = pScoresByJudge[email] || {};
+                                                const judgeTotal = Object.values(vals).reduce((s, v) => s + (parseFloat(v) || 0), 0);
+                                                sumOfTotals += judgeTotal;
+                                            });
+                                            displayTotal = (sumOfTotals / judgeEmails.length).toFixed(1);
+                                        } else {
+                                            displayTotal = '0.0';
+                                        }
+                                    } else {
+                                        displayTotal = calculateTotal(p.id);
+                                    }
 
                                     return (
                                         <tr key={p.id} className="hover:bg-white/[0.02] transition-colors group">
                                             <td className="sticky left-0 z-10 bg-[#0f172a]/95 backdrop-blur-sm px-4 py-3 text-center font-black text-slate-600 text-lg shadow-[1px_0_0_rgba(255,255,255,0.05)] group-hover:bg-[#151e32]/95 transition-colors">
                                                 {p.number}
                                             </td>
-                                            <td className="sticky left-16 z-10 bg-[#0f172a]/95 backdrop-blur-sm px-4 py-3 shadow-[4px_0_10px_rgba(0,0,0,0.3)] group-hover:bg-[#151e32]/95 transition-colors">
+                                            <td className="sticky left-16 z-10 bg-[#0f172a]/95 backdrop-blur-sm px-4 py-3 shadow-[4px_0_10px_rgba(0,0,0,0.3)] group-hover:bg-[#151e32]/95 transition-colors text-xs">
                                                 <div className="font-bold text-white text-base truncate max-w-[180px]">{p.name}</div>
                                             </td>
                                             {sortedItems.map(item => {
@@ -244,6 +315,19 @@ const Scorer = () => {
                                                     return (
                                                         <td key={item.id} className="px-2 py-2 text-center">
                                                             <div className="text-[10px] font-bold text-slate-700 italic select-none">-</div>
+                                                        </td>
+                                                    );
+                                                }
+
+                                                if (isAdmin) {
+                                                    const stats = getAdminItemStats(p.id, item.id);
+                                                    return (
+                                                        <td key={item.id} className="px-1 py-1">
+                                                            <div className="flex flex-col items-center justify-center p-1 bg-white/[0.03] rounded-lg h-12 border border-white/5">
+                                                                <div className="text-sm font-black text-indigo-400 tabular-nums">
+                                                                    {stats.avg > 0 ? stats.avg.toFixed(1) : '-'}
+                                                                </div>
+                                                            </div>
                                                         </td>
                                                     );
                                                 }
@@ -272,7 +356,7 @@ const Scorer = () => {
                                             })}
                                             <td className="sticky right-0 z-10 bg-[#0f172a]/95 backdrop-blur-sm px-4 py-3 text-center shadow-[-4px_0_10px_rgba(0,0,0,0.3)] group-hover:bg-[#151e32]/95 transition-colors">
                                                 <div className="font-black text-lg text-indigo-400 tabular-nums">
-                                                    {total}
+                                                    {displayTotal}
                                                 </div>
                                             </td>
                                         </tr>
@@ -283,6 +367,86 @@ const Scorer = () => {
                     </table>
                 </div>
             </div>
+
+            {/* Detailed Judge Breakdown Table (Admin Only) */}
+            {isAdmin && (
+                <div className="mt-12 animate-in fade-in slide-in-from-bottom-4 duration-700">
+                    <div className="flex items-center gap-2 mb-6">
+                        <Users className="text-emerald-400 w-6 h-6" />
+                        <h2 className="text-xl font-bold text-white uppercase tracking-tight">상세 심사 내역 (심사위원별 세부 점수)</h2>
+                    </div>
+
+                    <div className="glass-card overflow-hidden rounded-2xl border border-white/10 shadow-2xl">
+                        <div className="overflow-x-auto">
+                            <table className="w-full text-left border-collapse border border-white/10">
+                                <thead>
+                                    <tr className="bg-slate-900 text-[10px] font-black text-slate-400 uppercase tracking-widest border-b border-white/10">
+                                        <th className="px-4 py-4 w-12 text-center border-r border-white/10">No.</th>
+                                        <th className="px-4 py-4 min-w-[150px] border-r border-white/10 text-center">Participant</th>
+                                        <th className="px-4 py-4 min-w-[120px] border-r border-white/10 text-center">심사위원</th>
+                                        {sortedItems.map(item => (
+                                            <th key={item.id} className="px-2 py-4 text-center border-r border-white/10 min-w-[80px]">
+                                                {item.label}
+                                            </th>
+                                        ))}
+                                        <th className="px-4 py-4 w-20 text-center text-emerald-400">Total</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {sortedParticipants.map((p, pIdx) => {
+                                        const pScoresByJudge = scores[selectedCategoryId]?.[p.id] || {};
+                                        const yearJudges = judgesByYear[currentYearId] || [];
+
+                                        if (yearJudges.length === 0) return null;
+
+                                        return yearJudges.map((j, jIdx) => {
+                                            const vals = pScoresByJudge[j.email] || {};
+                                            const judgeTotal = Object.keys(vals).length > 0
+                                                ? Object.values(vals).reduce((s, v) => s + (parseFloat(v) || 0), 0).toFixed(1)
+                                                : '-';
+
+                                            return (
+                                                <tr key={`${p.id}-${j.email}`} className={cn(
+                                                    "hover:bg-white/[0.02] transition-colors",
+                                                    jIdx === yearJudges.length - 1 && pIdx !== sortedParticipants.length - 1 ? "border-b-2 border-white/20" : "border-b border-white/5"
+                                                )}>
+                                                    {jIdx === 0 && (
+                                                        <>
+                                                            <td rowSpan={yearJudges.length} className="px-4 py-4 text-center font-black text-slate-300 text-lg border-r border-white/10 bg-slate-900/40">
+                                                                {p.number}
+                                                            </td>
+                                                            <td rowSpan={yearJudges.length} className="px-4 py-4 font-bold text-white border-r border-white/10 bg-slate-900/40 text-center">
+                                                                {p.name}
+                                                            </td>
+                                                        </>
+                                                    )}
+                                                    <td className="px-4 py-4 font-bold text-slate-300 border-r border-white/10 text-center bg-white/[0.02]">
+                                                        {j.name}
+                                                    </td>
+                                                    {sortedItems.map(item => {
+                                                        const isTeamwork = item.label === '팀워크';
+                                                        const isDisabled = (isSolo && isTeamwork);
+                                                        const score = vals[item.id];
+
+                                                        return (
+                                                            <td key={item.id} className="px-2 py-4 text-center border-r border-white/10 tabular-nums font-mono font-bold text-slate-400">
+                                                                {isDisabled ? '-' : (score !== undefined ? parseFloat(score).toFixed(1) : '-')}
+                                                            </td>
+                                                        );
+                                                    })}
+                                                    <td className="px-4 py-4 text-center font-black text-emerald-400 tabular-nums bg-emerald-500/5">
+                                                        {judgeTotal}
+                                                    </td>
+                                                </tr>
+                                            );
+                                        });
+                                    })}
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            )}
 
             <div className="mt-8 flex justify-end text-xs text-slate-500 font-bold uppercase tracking-widest gap-4">
                 {isSaving && (

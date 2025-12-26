@@ -61,7 +61,10 @@ const useStore = create((set, get) => ({
     // Scorer Actions
     updateScore: async (categoryId, participantId, itemId, score) => {
         const { currentUser, years } = get();
-        if (!currentUser || (currentUser.role !== 'JUDGE' && currentUser.role !== 'ADMIN')) return;
+        // Permission check: Only JUDGE or ADMIN/ROOT_ADMIN can edit
+        const isAdmin = currentUser?.role === 'ADMIN' || currentUser?.role === 'ROOT_ADMIN';
+        const isJudge = currentUser?.role === 'JUDGE';
+        if (!isAdmin && !isJudge) return;
 
         // Check if year is locked
         const yearId = categoryId.split('-')[0];
@@ -226,6 +229,61 @@ const useStore = create((set, get) => ({
 
     removeParticipant: async (categoryId, participantId) => {
         await deleteDoc(doc(db, 'participants', `${categoryId}_${participantId}`));
+    },
+
+    seedRandomScores: async (yearId) => {
+        const { years, participants, scoringItems } = get();
+        const year = years.find(y => y.id === yearId);
+        if (!year) return;
+
+        const batch = writeBatch(db);
+        const mockJudges = [
+            { email: 'kylevamos00@gmail.com', name: '박시홍' },
+            { email: 'ilrujer@gmail.com', name: '염은영' }
+        ];
+
+        for (const cat of year.categories) {
+            const catParticipants = participants[cat.id] || [];
+
+            // Also ensure these judges are registered for the year in the DB
+            for (const judge of mockJudges) {
+                const judgeRef = doc(db, 'judges', `${yearId}_${judge.email}`);
+                batch.set(judgeRef, { yearId, email: judge.email, name: judge.name });
+            }
+
+            for (const p of catParticipants) {
+                for (const judge of mockJudges) {
+                    const docId = `${cat.id}_${p.id}_${judge.email}`;
+                    const scoreRef = doc(db, 'scores', docId);
+                    const values = {};
+                    scoringItems.forEach(item => {
+                        // Generate random score between 5.0 and 10.0 for realism
+                        values[item.id] = parseFloat((Math.random() * 5 + 5).toFixed(1));
+                    });
+                    batch.set(scoreRef, { values });
+                }
+            }
+        }
+        await batch.commit();
+    },
+
+    clearYearScores: async (yearId) => {
+        const { years } = get();
+        const year = years.find(y => y.id === yearId);
+        if (!year) return;
+
+        // Note: Firestore doesn't have a direct "delete where" for collections.
+        // For a full production app, we would use a Cloud Function.
+        // For this test tool, we'll fetch and delete.
+        const q = query(collection(db, 'scores'));
+        const snapshot = await getDocs(q);
+        const batch = writeBatch(db);
+        snapshot.docs.forEach(d => {
+            if (d.id.startsWith(yearId)) {
+                batch.delete(d.ref);
+            }
+        });
+        await batch.commit();
     },
 
     // Firebase Initialization & Sync
