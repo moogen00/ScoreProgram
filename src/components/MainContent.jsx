@@ -12,7 +12,7 @@ const MainContent = () => {
 
     const renderContent = () => {
         const isAdmin = role === 'ADMIN' || role === 'ROOT_ADMIN';
-        const view = activeView || (isAdmin ? 'admin' : role === 'JUDGE' ? 'scorer' : 'leaderboard');
+        const view = activeView || (isAdmin ? 'admin' : 'scorer');
 
         switch (view) {
             case 'admin':

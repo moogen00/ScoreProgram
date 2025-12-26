@@ -67,7 +67,7 @@ const LoginPage = () => {
 
                     <div className="relative py-4">
                         <div className="absolute inset-0 flex items-center"><div className="w-full border-t border-white/10"></div></div>
-                        <div className="relative flex justify-center text-xs uppercase"><span className="bg-slate-900 px-4 text-slate-500 font-bold">또는 (테스트용)</span></div>
+                        <div className="relative flex justify-center text-xs uppercase"><span className="bg-slate-900 px-4 text-slate-500 font-bold">Dev Login (No Auth Required)</span></div>
                     </div>
 
                     <div className="grid grid-cols-1 gap-3">
@@ -76,14 +76,14 @@ const LoginPage = () => {
                             className="w-full py-3 px-4 rounded-xl border border-white/10 bg-white/5 hover:bg-white/10 transition-all font-bold text-sm text-slate-300 flex items-center justify-center gap-2"
                         >
                             <LogIn size={16} className="text-rose-400" />
-                            관리자로 로그인
+                            관리자로 로그인 (Admin)
                         </button>
                         <button
                             onClick={() => handleMockLogin('judge@example.com')}
                             className="w-full py-3 px-4 rounded-xl border border-white/10 bg-white/5 hover:bg-white/10 transition-all font-bold text-sm text-slate-300 flex items-center justify-center gap-2"
                         >
                             <LogIn size={16} className="text-amber-400" />
-                            심사위원으로 로그인 (메일 등록 필요)
+                            심사위원으로 로그인 (Judge)
                         </button>
                         <button
                             onClick={() => {
@@ -92,7 +92,7 @@ const LoginPage = () => {
                             className="w-full py-3 px-4 rounded-xl border border-white/10 bg-white/5 hover:bg-white/10 transition-all font-bold text-sm text-slate-300 flex items-center justify-center gap-2"
                         >
                             <LogIn size={16} className="text-emerald-400" />
-                            일반 사용자로 시작
+                            일반 사용자로 로그인 (User)
                         </button>
                     </div>
                 </div>

@@ -24,9 +24,10 @@ const Header = () => {
 
     const getRoleConfig = (role) => {
         switch (role) {
-            case 'ADMIN': return { label: '관리자', icon: Shield, color: 'text-rose-400', bg: 'bg-rose-500/10' };
+            case 'ROOT_ADMIN':
+            case 'ADMIN': return { label: 'Admin User', icon: Shield, color: 'text-rose-400', bg: 'bg-rose-500/10' };
             case 'JUDGE': return { label: '심사위원', icon: PenTool, color: 'text-amber-400', bg: 'bg-amber-500/10' };
-            default: return { label: '일반 사용자', icon: User, color: 'text-emerald-400', bg: 'bg-emerald-500/10' };
+            default: return { label: '일반사용자', icon: User, color: 'text-emerald-400', bg: 'bg-emerald-500/10' };
         }
     };
 

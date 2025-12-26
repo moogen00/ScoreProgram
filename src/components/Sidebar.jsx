@@ -93,7 +93,10 @@ const Sidebar = () => {
                         )}
                     >
                         <Settings size={16} />
-                        대회 설정 (Admin Panel)
+                        <div className="flex flex-col items-start leading-tight">
+                            <span>대회설정</span>
+                            <span className="text-[10px] opacity-80">(ADMIN PANEL)</span>
+                        </div>
                     </button>
                 </div>
             )}

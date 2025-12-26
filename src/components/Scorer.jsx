@@ -1,5 +1,5 @@
-import React, { useState, useEffect, useCallback } from 'react';
-import { PenTool, Lock, Save, AlertCircle } from 'lucide-react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import { PenTool, Lock, Save, AlertCircle, Medal } from 'lucide-react';
 import useStore from '../store/useStore';
 
 const Scorer = () => {
@@ -18,10 +18,13 @@ const Scorer = () => {
 
     // Auth & Lock logic
     const isYearLocked = currentYear?.locked;
-    const isJudgeForThisYear = judgesByYear[currentYearId]?.some(j => j.email === currentUser?.email);
     const isAdmin = currentUser?.role === 'ADMIN' || currentUser?.role === 'ROOT_ADMIN';
-    const isAuthorized = isAdmin || isJudgeForThisYear;
-    const isLocked = isYearLocked && !isAdmin;
+    const isJudgeForThisYear = judgesByYear[currentYearId]?.some(j => j.email === currentUser?.email);
+
+    // Auth: Everyone can view, but only Admin/Assigned Judge can edit
+    const isAuthorized = true;
+    const canEdit = isAdmin || isJudgeForThisYear;
+    const isLocked = (isYearLocked && !isAdmin) || !canEdit;
 
     // Initialize local scores from store
     useEffect(() => {
@@ -38,14 +41,10 @@ const Scorer = () => {
     const handleScoreChange = (participantId, itemId, val) => {
         if (isLocked) return;
 
-        // Allow empty string for clearing
         if (val === '') {
             setLocalScores(prev => ({
                 ...prev,
-                [participantId]: {
-                    ...prev[participantId],
-                    [itemId]: ''
-                }
+                [participantId]: { ...prev[participantId], [itemId]: '' }
             }));
             return;
         }
@@ -57,18 +56,13 @@ const Scorer = () => {
 
         setLocalScores(prev => ({
             ...prev,
-            [participantId]: {
-                ...prev[participantId],
-                [itemId]: num
-            }
+            [participantId]: { ...prev[participantId], [itemId]: num }
         }));
     };
 
     const handleBlur = async (participantId, itemId) => {
         if (isLocked) return;
         const val = localScores[participantId]?.[itemId];
-        // If val is valid number (or 0), save it. If empty string, do nothing?
-        // Existing logic used parseFloat. Let's save if valid number.
         if (val === '' || val === undefined) return;
 
         setIsSaving(true);
@@ -81,16 +75,35 @@ const Scorer = () => {
         }
     };
 
-    const calculateTotal = (pId) => {
-        const pScores = localScores[pId] || {};
+    const calculateTotal = useCallback((pId, scoresObj = localScores) => {
+        const pScores = scoresObj[pId] || {};
         return Object.values(pScores).reduce((sum, val) => {
             const num = parseFloat(val);
             return sum + (isNaN(num) ? 0 : num);
         }, 0).toFixed(1);
-    };
+    }, [localScores]);
 
     // Sort scoring items
     const sortedItems = [...scoringItems].sort((a, b) => a.order - b.order);
+
+    // Sort participants by Number
+    const sortedParticipants = useMemo(() => {
+        return [...categoryParticipants].sort((a, b) => {
+            const numA = parseInt(a.number) || 0;
+            const numB = parseInt(b.number) || 0;
+            return numA - numB;
+        });
+    }, [categoryParticipants]);
+
+    // Calculate Rankings
+    const topRanked = useMemo(() => {
+        const withScores = sortedParticipants.map(p => ({
+            ...p,
+            total: parseFloat(calculateTotal(p.id))
+        })).filter(p => p.total > 0);
+
+        return withScores.sort((a, b) => b.total - a.total).slice(0, 3);
+    }, [sortedParticipants, calculateTotal]);
 
     if (!selectedCategoryId) {
         return (
@@ -103,9 +116,6 @@ const Scorer = () => {
                     <span className="text-transparent bg-clip-text bg-gradient-to-r from-indigo-400 to-purple-400">댄서들의 꿈</span>을<br />
                     이루게 해주세요.
                 </h1>
-                <p className="text-slate-500 font-bold uppercase tracking-widest text-sm">
-                    좌측 메뉴에서 심사할 종목을 선택해 주세요.
-                </p>
             </div>
         );
     }
@@ -115,39 +125,64 @@ const Scorer = () => {
             <div className="max-w-5xl mx-auto py-20 flex flex-col items-center justify-center text-center p-10 glass-card border-dashed border-2 border-slate-700">
                 <Lock size={48} className="mb-4 text-rose-500 opacity-50" />
                 <h2 className="text-2xl font-bold text-white mb-2">접근 권한이 없습니다</h2>
-                <p className="text-slate-500">해당 연도의 심사 위원 또는 관리자만 접근할 수 있습니다.</p>
             </div>
         );
     }
 
     return (
         <div className="max-w-screen-xl mx-auto pb-20 px-4">
-            <div className="flex flex-col md:flex-row md:items-end justify-between gap-4 mb-8">
+            {/* Header Section */}
+            <div className="flex flex-col md:flex-row md:items-end justify-between gap-4 mb-4">
                 <div>
                     <div className="flex items-center gap-3 mb-2">
                         <PenTool className="text-amber-400 w-6 h-6" />
                         <span className="text-amber-400 font-bold tracking-widest text-xs uppercase">Scoring Room</span>
                     </div>
-                    <h1 className="text-3xl md:text-4xl font-black italic tracking-tighter uppercase text-white">
+                    <h1 className="text-3xl md:text-3xl font-black italic tracking-tighter uppercase text-white">
                         {categoryName}
                     </h1>
                 </div>
 
-                {isLocked && (
-                    <div className="bg-rose-500/20 border border-rose-500/50 px-4 py-2 rounded-lg flex items-center gap-2 text-rose-400 font-bold animate-pulse">
-                        <Lock size={16} />
-                        <span>SCORING LOCKED</span>
-                    </div>
-                )}
-                {isSaving && (
-                    <div className="text-emerald-400 text-xs font-bold flex items-center gap-1">
-                        <Save size={12} className="animate-bounce" /> Saving...
-                    </div>
-                )}
+                <div className="flex items-center gap-3">
+                    {(isLocked && !canEdit && !isAdmin) && (
+                        <div className="bg-slate-500/20 border border-slate-500/50 px-4 py-2 rounded-lg flex items-center gap-2 text-slate-400 font-bold">
+                            <Lock size={16} />
+                            <span>READ ONLY</span>
+                        </div>
+                    )}
+                    {(isLocked && (isAdmin || canEdit)) && (
+                        <div className="bg-rose-500/20 border border-rose-500/50 px-4 py-2 rounded-lg flex items-center gap-2 text-rose-400 font-bold animate-pulse">
+                            <Lock size={16} />
+                            <span>LOCKED</span>
+                        </div>
+                    )}
+                </div>
             </div>
 
+            {/* Top 3 Ranking Widget */}
+            {topRanked.length > 0 && (
+                <div className="grid grid-cols-3 gap-2 md:gap-4 mb-6">
+                    {topRanked.map((p, index) => (
+                        <div key={p.id} className={`p-3 rounded-xl border ${index === 0 ? 'bg-amber-500/10 border-amber-500/30' : index === 1 ? 'bg-slate-400/10 border-slate-400/30' : 'bg-orange-700/10 border-orange-700/30'} flex flex-col items-center justify-center relative overflow-hidden group`}>
+                            <div className={`absolute top-0 right-0 p-1.5 rounded-bl-lg font-black text-[10px] ${index === 0 ? 'bg-amber-500 text-black' : index === 1 ? 'bg-slate-400 text-black' : 'bg-orange-700 text-white'}`}>
+                                {index + 1}{index === 0 ? 'st' : index === 1 ? 'nd' : 'rd'}
+                            </div>
+                            <div className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">Rank {index + 1}</div>
+                            <div className="text-sm md:text-base font-black text-white truncate max-w-full">{p.name}</div>
+                            <div className="text-lg md:text-xl font-black text-indigo-400 tabular-nums">{p.total}</div>
+                            {index === 0 && <Medal className="absolute -bottom-4 -left-4 w-16 h-16 text-amber-500/10 rotate-12" />}
+                        </div>
+                    ))}
+                    {topRanked.length < 3 && Array.from({ length: 3 - topRanked.length }).map((_, i) => (
+                        <div key={i} className="p-3 rounded-xl border border-white/5 bg-white/5 flex flex-col items-center justify-center opacity-50">
+                            <div className="text-[10px] font-bold text-slate-600 uppercase tracking-widest mb-1">Rank {topRanked.length + i + 1}</div>
+                            <div className="w-8 h-1 bg-white/10 rounded my-2"></div>
+                        </div>
+                    ))}
+                </div>
+            )}
+
             <style>{`
-                /* Hide number input arrows */
                 input[type=number]::-webkit-inner-spin-button, 
                 input[type=number]::-webkit-outer-spin-button { 
                     -webkit-appearance: none; 
@@ -166,12 +201,9 @@ const Scorer = () => {
                                 <th className="sticky left-0 z-20 bg-slate-900/95 backdrop-blur-sm px-4 py-4 w-16 text-center shadow-[1px_0_0_rgba(255,255,255,0.1)]">No.</th>
                                 <th className="sticky left-16 z-20 bg-slate-900/95 backdrop-blur-sm px-4 py-4 min-w-[160px] shadow-[4px_0_10px_rgba(0,0,0,0.5)]">Participant</th>
                                 {sortedItems.map(item => {
-                                    // Parse label to separate Korean and English if needed
-                                    // Assuming format "Korean (English)" or just "Korean"
                                     const match = item.label.match(/^([^(]+)(\(([^)]+)\))?$/);
                                     const mainLabel = match ? match[1].trim() : item.label;
                                     const subLabel = match && match[3] ? match[3].trim() : '';
-
                                     return (
                                         <th key={item.id} className="px-2 py-4 text-center min-w-[70px]">
                                             <div className="flex flex-col items-center justify-center leading-tight">
@@ -185,7 +217,7 @@ const Scorer = () => {
                             </tr>
                         </thead>
                         <tbody className="divide-y divide-white/5">
-                            {categoryParticipants.length === 0 ? (
+                            {sortedParticipants.length === 0 ? (
                                 <tr>
                                     <td colSpan={3 + sortedItems.length} className="px-6 py-20 text-center">
                                         <AlertCircle className="mx-auto text-slate-600 mb-4 w-12 h-12" />
@@ -193,7 +225,7 @@ const Scorer = () => {
                                     </td>
                                 </tr>
                             ) : (
-                                categoryParticipants.map((p, index) => {
+                                sortedParticipants.map((p) => {
                                     const total = calculateTotal(p.id);
 
                                     return (
@@ -253,8 +285,10 @@ const Scorer = () => {
             </div>
 
             <div className="mt-8 flex justify-end text-xs text-slate-500 font-bold uppercase tracking-widest gap-4">
+                {isSaving && (
+                    <span className="flex items-center gap-2 animate-pulse text-emerald-400"><Save size={12} /> Saving...</span>
+                )}
                 <span className="flex items-center gap-2"><div className="w-2 h-2 rounded-full bg-indigo-500"></div> Auto-Saving Enabled</span>
-                <span className="flex items-center gap-2"><div className="w-2 h-2 rounded-full bg-rose-500"></div> Min: 0 / Max: 10</span>
             </div>
         </div>
     );
