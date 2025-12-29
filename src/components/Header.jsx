@@ -14,10 +14,10 @@ const Header = () => {
     // Find current year and category names for breadcrumbs
     const findInfo = () => {
         for (const year of years) {
-            const cat = year.categories.find(c => c.id === selectedCategoryId);
-            if (cat) return { yearName: year.name, catName: cat.name };
+            const cat = year?.categories?.find(c => c.id === selectedCategoryId);
+            if (cat) return { yearName: year.name || '대회 연도 미정', catName: cat.name || '종목 미지정' };
         }
-        return { yearName: 'Unknown', catName: 'None' };
+        return { yearName: '대회 연도 미정', catName: '종목 미지정' };
     };
 
     const { yearName, catName } = findInfo();

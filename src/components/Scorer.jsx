@@ -9,7 +9,12 @@ function cn(...inputs) {
 }
 
 const Scorer = () => {
-    const { scoringItems, updateScore, selectedCategoryId, scores, participants, currentUser, years, judgesByYear } = useStore();
+    const { scoringItems, updateScore, selectedCategoryId, scores, participants, currentUser, years, judgesByYear, isInitialSyncComplete } = useStore();
+
+    console.log(`[Scorer] Rendering. Category: ${selectedCategoryId}, Participants count: ${participants[selectedCategoryId]?.length || 0}`);
+    if (participants[selectedCategoryId]) {
+        console.log(`[Scorer] Participants for ${selectedCategoryId}:`, participants[selectedCategoryId]);
+    }
 
     const categoryParticipants = participants[selectedCategoryId] || [];
     // localScores structure: { [participantId]: { [itemId]: value } }
@@ -19,7 +24,7 @@ const Scorer = () => {
     // Initial check logic
     const currentYear = years.find(y => y.categories?.some(c => c.id === selectedCategoryId));
     const currentYearId = currentYear?.id;
-    const categoryName = currentYear?.categories.find(c => c.id === selectedCategoryId)?.name || '';
+    const categoryName = currentYear?.categories?.find(c => c.id === selectedCategoryId)?.name || '';
     const isSolo = categoryName.toUpperCase().includes('SOLO');
 
     // Auth & Lock logic
@@ -182,6 +187,30 @@ const Scorer = () => {
         );
     }
 
+    // Global loading state: Wait until initial sync is complete
+    if (!isInitialSyncComplete) {
+        return (
+            <div className="max-w-screen-xl mx-auto pb-20 px-4">
+                <div className="min-h-[60vh] flex flex-col items-center justify-center text-center p-10">
+                    <div className="w-12 h-12 border-4 border-indigo-500/20 border-t-indigo-500 rounded-full animate-spin mb-4" />
+                    <p className="text-slate-500 font-bold uppercase tracking-widest text-sm">데이터를 동기화 중입니다...</p>
+                </div>
+            </div>
+        );
+    }
+
+    // After sync, if no participants exist for the selected category
+    if (categoryParticipants.length === 0) {
+        return (
+            <div className="max-w-screen-xl mx-auto pb-20 px-4">
+                <div className="min-h-[60vh] flex flex-col items-center justify-center text-center p-10 border-2 border-dashed border-white/5 rounded-3xl">
+                    <Users className="text-slate-700 w-12 h-12 mb-4" />
+                    <p className="text-slate-500 font-bold uppercase tracking-widest text-sm italic">등록된 참가자가 없습니다.</p>
+                </div>
+            </div>
+        );
+    }
+
     return (
         <div className="max-w-screen-xl mx-auto pb-20 px-4">
             {/* Header Section */}
@@ -212,8 +241,8 @@ const Scorer = () => {
                 </div>
             </div>
 
-            {/* Top 3 Ranking Widget */}
-            {topRanked.length > 0 && (
+            {/* Top 3 Ranking Widget (Admin Only) */}
+            {(isAdmin && topRanked.length > 0) && (
                 <div className="grid grid-cols-3 gap-2 md:gap-4 mb-6">
                     {topRanked.map((p, index) => (
                         <div key={p.id} className={`p-3 rounded-xl border ${index === 0 ? 'bg-amber-500/10 border-amber-500/30' : index === 1 ? 'bg-slate-400/10 border-slate-400/30' : 'bg-orange-700/10 border-orange-700/30'} flex flex-col items-center justify-center relative overflow-hidden group`}>
@@ -336,7 +365,11 @@ const Scorer = () => {
 
                                                 return (
                                                     <td key={item.id} className="px-1 py-1">
-                                                        <div className={`relative flex items-center justify-center w-full h-12 rounded-lg transition-colors border border-transparent ${isActive ? 'bg-indigo-500/10 border-indigo-500/30' : 'bg-white/5'}`}>
+                                                        <div className={cn(
+                                                            "relative flex items-center justify-center w-full h-12 rounded-lg transition-all border",
+                                                            isActive ? "bg-indigo-500/10 border-indigo-500/30" : "bg-white/5 border-transparent",
+                                                            isLocked && "opacity-40 grayscale-[0.5]"
+                                                        )}>
                                                             <input
                                                                 type="number"
                                                                 inputMode="decimal"
@@ -347,9 +380,16 @@ const Scorer = () => {
                                                                 value={localScores[p.id]?.[item.id] ?? ''}
                                                                 onChange={(e) => handleScoreChange(p.id, item.id, e.target.value)}
                                                                 onBlur={() => handleBlur(p.id, item.id)}
-                                                                className="w-full h-full bg-transparent text-center font-mono font-bold text-lg text-white outline-none focus:text-indigo-400 placeholder-white/10"
+                                                                className={cn(
+                                                                    "w-full h-full bg-transparent text-center font-mono font-bold text-lg outline-none placeholder-white/10",
+                                                                    isActive ? "text-indigo-400" : "text-white",
+                                                                    isLocked ? "cursor-not-allowed" : "focus:text-indigo-400"
+                                                                )}
                                                                 placeholder="-"
                                                             />
+                                                            {isLocked && !isActive && (
+                                                                <Lock size={10} className="absolute bottom-1 right-1 text-slate-500" />
+                                                            )}
                                                         </div>
                                                     </td>
                                                 );

@@ -13,7 +13,7 @@ const Leaderboard = () => {
     const { scoringItems, scores, selectedCategoryId, participants, currentUser } = useStore();
     const [expandedPId, setExpandedPId] = React.useState(null);
 
-    const isAdmin = currentUser?.role === 'ADMIN';
+    const isAdmin = currentUser?.role === 'ADMIN' || currentUser?.role === 'ROOT_ADMIN';
 
     const categoryParticipants = participants[selectedCategoryId] || [];
     const categoryScores = scores[selectedCategoryId] || {};

@@ -290,8 +290,11 @@ const Sidebar = ({ width }) => {
                                             ) : (
                                                 <button
                                                     onClick={() => {
+                                                        console.log(`[Sidebar] Category clicked: ${cat.name} (ID: ${cat.id})`);
                                                         setSelectedCategoryId(cat.id);
-                                                        if (userRole === 'ADMIN' || userRole === 'ROOT_ADMIN') setActiveView('scorer');
+                                                        if (userRole === 'ADMIN' || userRole === 'ROOT_ADMIN' || userRole === 'JUDGE') {
+                                                            setActiveView('scorer');
+                                                        }
                                                     }}
                                                     className={cn(
                                                         "sidebar-item w-full flex items-center gap-3 pl-6 relative",

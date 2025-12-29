@@ -3,9 +3,11 @@ import Sidebar from './components/Sidebar';
 import Header from './components/Header';
 import MainContent from './components/MainContent';
 import LoginPage from './components/LoginPage';
+import DebugPanel from './components/DebugPanel';
 import useStore from './store/useStore';
 
 function App() {
+    window.store = useStore;
     const currentUser = useStore((state) => state.currentUser);
     const initSync = useStore((state) => state.initSync);
 
@@ -87,6 +89,7 @@ function App() {
                     <MainContent />
                 </main>
             </div>
+            <DebugPanel />
         </div>
     );
 }

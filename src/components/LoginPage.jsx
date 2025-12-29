@@ -85,23 +85,41 @@ const LoginPage = () => {
                             <LogIn size={16} className="text-amber-400" />
                             심사위원으로 로그인 (Judge)
                         </button>
-                        <button
-                            onClick={() => {
-                                login({ email: 'user@example.com', name: 'General User', picture: null });
-                            }}
-                            className="w-full py-3 px-4 rounded-xl border border-white/10 bg-white/5 hover:bg-white/10 transition-all font-bold text-sm text-slate-300 flex items-center justify-center gap-2"
-                        >
-                            <LogIn size={16} className="text-emerald-400" />
-                            일반 사용자로 로그인 (User)
-                        </button>
+
+                        {/* Custom Email Login Box */}
+                        <div className="flex flex-col gap-2 p-3 bg-white/5 border border-white/10 rounded-xl mt-2">
+                            <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest text-left px-1">임의 계정 테스트 (Custom Email Login)</p>
+                            <div className="flex gap-2">
+                                <input
+                                    id="custom-email"
+                                    type="email"
+                                    placeholder="test@example.com"
+                                    className="flex-1 bg-black/40 border border-white/10 rounded-lg px-3 py-2 text-xs text-white focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                                    onKeyDown={(e) => {
+                                        if (e.key === 'Enter') {
+                                            handleMockLogin(e.target.value);
+                                        }
+                                    }}
+                                />
+                                <button
+                                    onClick={() => {
+                                        const email = document.getElementById('custom-email').value;
+                                        if (email) handleMockLogin(email);
+                                    }}
+                                    className="bg-indigo-600 hover:bg-indigo-500 text-white px-4 py-2 rounded-lg text-xs font-bold transition-all"
+                                >
+                                    Login
+                                </button>
+                            </div>
+                        </div>
                     </div>
                 </div>
 
                 <p className="mt-10 text-[10px] text-slate-600 font-bold uppercase tracking-widest">
                     © 2025 Korea Latin Dance Cup
                 </p>
-            </motion.div>
-        </div>
+            </motion.div >
+        </div >
     );
 };
 

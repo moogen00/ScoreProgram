@@ -12,7 +12,7 @@ const AdminPanel = () => {
     const {
         scoringItems, addScoringItem, removeScoringItem, updateScoringItemOrder,
         judgesByYear, addJudge, removeJudge,
-        participants, addParticipant, removeParticipant, updateParticipant,
+        participants, addParticipant, removeParticipant, updateParticipant, moveParticipants,
         selectedCategoryId, years,
         addCategory, updateCategory, deleteCategory, moveCategory, sortCategoriesByName, toggleYearLock,
         admins, addAdmin, removeAdmin, competitionName, setCompetitionName,
@@ -44,6 +44,7 @@ const AdminPanel = () => {
 
     // Participant Batch & Sort states
     const [sortConfig, setSortConfig] = useState({ field: 'no', direction: 'asc' });
+    const [recoveryTargetCatId, setRecoveryTargetCatId] = useState('');
 
     // Find info for current category
     const findCatInfo = () => {
@@ -125,6 +126,30 @@ const AdminPanel = () => {
             field: 'no',
             direction: prev.direction === 'asc' ? 'desc' : 'asc'
         }));
+    };
+
+    const getOrphanParticipants = () => {
+        const allCatIds = new Set(years.flatMap(y => (y.categories || []).map(c => c.id)));
+        const orphaned = [];
+        Object.keys(participants).forEach(catId => {
+            if (!allCatIds.has(catId)) {
+                participants[catId].forEach(p => {
+                    const yearName = catId.split('-')[0] || '?';
+                    orphaned.push({ ...p, oldCategoryId: catId, yearName });
+                });
+            }
+        });
+        return orphaned;
+    };
+    const orphanParticipants = getOrphanParticipants();
+
+    const handleRecovery = async (oldCatId, pIds) => {
+        if (!recoveryTargetCatId) return alert('복구할 대상 종목을 선택해주세요.');
+        if (confirm(`${pIds.length}명의 참가자를 선택한 종목으로 이동하시겠습니까?`)) {
+            await moveParticipants(oldCatId, recoveryTargetCatId, pIds);
+            setRecoveryTargetCatId('');
+            alert('복구가 완료되었습니다.');
+        }
     };
 
     return (
@@ -293,6 +318,61 @@ const AdminPanel = () => {
                                         ))}
                                     </tbody>
                                 </table>
+                            </div>
+                        </div>
+                    )}
+                    {/* Orphan Participants Recovery Section */}
+                    {orphanParticipants.length > 0 && (
+                        <div className="mt-12 p-6 bg-rose-500/5 border border-rose-500/20 rounded-2xl animate-pulse-subtle">
+                            <div className="flex items-center gap-3 mb-6">
+                                <div className="p-2 bg-rose-500/20 rounded-lg text-rose-400">
+                                    <Trash2 size={20} />
+                                </div>
+                                <div>
+                                    <h3 className="text-lg font-bold text-white">끊어진 참가자 복구 (Recovery Required)</h3>
+                                    <p className="text-xs text-rose-400/70">종목 정보가 삭제되거나 변경되어 연결이 끊어진 {orphanParticipants.length}명의 참가자가 발견되었습니다.</p>
+                                </div>
+                            </div>
+
+                            <div className="grid grid-cols-1 gap-4">
+                                {Object.entries(
+                                    orphanParticipants.reduce((acc, p) => {
+                                        if (!acc[p.oldCategoryId]) acc[p.oldCategoryId] = [];
+                                        acc[p.oldCategoryId].push(p);
+                                        return acc;
+                                    }, {})
+                                ).map(([oldCatId, ps]) => (
+                                    <div key={oldCatId} className="bg-black/40 border border-white/10 rounded-xl p-4 flex flex-col md:flex-row md:items-center justify-between gap-4">
+                                        <div>
+                                            <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1">Ghost Category ID</p>
+                                            <code className="text-rose-400 font-mono text-sm">{oldCatId}</code>
+                                            <p className="text-white font-bold mt-1">{ps.length}명의 참가자 (예: {ps[0].name}...)</p>
+                                        </div>
+                                        <div className="flex flex-col sm:flex-row gap-2 items-end sm:items-center">
+                                            <select
+                                                value={recoveryTargetCatId}
+                                                onChange={(e) => setRecoveryTargetCatId(e.target.value)}
+                                                className="bg-slate-800 border border-white/20 rounded-lg px-3 py-2 text-xs text-white outline-none w-full sm:w-48"
+                                            >
+                                                <option value="">복구 대상 종목 선택</option>
+                                                {years.map(y => (
+                                                    <optgroup key={y.id} label={`${y.name}년`}>
+                                                        {(y.categories || []).map(c => (
+                                                            <option key={c.id} value={c.id}>{c.name}</option>
+                                                        ))}
+                                                    </optgroup>
+                                                ))}
+                                            </select>
+                                            <button
+                                                onClick={() => handleRecovery(oldCatId, ps.map(p => p.id))}
+                                                disabled={!recoveryTargetCatId}
+                                                className="bg-rose-600 hover:bg-rose-500 disabled:opacity-30 text-white px-4 py-2 rounded-lg text-xs font-bold transition-all whitespace-nowrap"
+                                            >
+                                                이 종목으로 모두 이동
+                                            </button>
+                                        </div>
+                                    </div>
+                                ))}
                             </div>
                         </div>
                     )}

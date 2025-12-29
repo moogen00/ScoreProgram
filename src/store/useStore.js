@@ -18,8 +18,8 @@ const ADMIN_EMAILS = []; // Deprecated/Unused for hardcoding, using DB 'admins' 
 
 const useStore = create((set, get) => ({
     // Auth state
-    currentUser: null, // { email, name, picture, role }
     admins: [], // [ { email, name } ]
+    isInitialSyncComplete: false,
 
     // Hierarchy & Settings
     competitionName: '...', // Loaded from DB
@@ -33,23 +33,32 @@ const useStore = create((set, get) => ({
 
     // Auth Actions
     login: (userData) => {
-        const { judgesByYear } = get();
-        let role = 'USER';
-
-        // Flatten all judges from all years to check roll
-        const allJudgesEmails = Object.values(judgesByYear).flat().map(j => j.email);
-        const allAdminEmails = get().admins.map(a => a.email);
-
-        if (ROOT_ADMIN_EMAILS.includes(userData.email)) {
-            role = 'ROOT_ADMIN';
-        } else if (allAdminEmails.includes(userData.email)) {
-            role = 'ADMIN';
-        } else if (allJudgesEmails.includes(userData.email) || userData.email === 'judge@example.com') {
-            role = 'JUDGE';
-        }
-        set({ currentUser: { ...userData, role } });
+        set({ currentUser: { ...userData, role: 'USER' } });
+        get().syncUserRole();
     },
     logout: () => set({ currentUser: null }),
+
+    syncUserRole: () => {
+        const { currentUser, judgesByYear, admins } = get();
+        if (!currentUser) return;
+
+        let role = 'USER';
+        const allJudgesEmails = Object.values(judgesByYear).flat().map(j => j.email);
+        const allAdminEmails = admins.map(a => a.email);
+
+        if (ROOT_ADMIN_EMAILS.includes(currentUser.email)) {
+            role = 'ROOT_ADMIN';
+        } else if (allAdminEmails.includes(currentUser.email)) {
+            role = 'ADMIN';
+        } else if (allJudgesEmails.includes(currentUser.email) || currentUser.email === 'judge@example.com') {
+            role = 'JUDGE';
+        }
+
+        if (currentUser.role !== role) {
+            set({ currentUser: { ...currentUser, role } });
+            console.log(`[Auth] User Role updated: ${currentUser.email} -> ${role}`);
+        }
+    },
 
     // Settings Actions
     setCompetitionName: async (name) => {
@@ -79,7 +88,7 @@ const useStore = create((set, get) => ({
         // Check if year is locked
         const yearId = categoryId.split('-')[0];
         const year = years.find(y => y.id === yearId);
-        if (year?.locked && currentUser.role !== 'ADMIN') {
+        if (year?.locked && !isAdmin) {
             console.error('Scoring is locked for this competition.');
             return;
         }
@@ -241,6 +250,21 @@ const useStore = create((set, get) => ({
         await deleteDoc(doc(db, 'participants', `${categoryId}_${participantId}`));
     },
 
+    moveParticipants: async (oldCategoryId, newCategoryId, participantIds) => {
+        const batch = writeBatch(db);
+        for (const pId of participantIds) {
+            const oldRef = doc(db, 'participants', `${oldCategoryId}_${pId}`);
+            const oldSnap = await getDoc(oldRef);
+            if (oldSnap.exists()) {
+                const data = oldSnap.data();
+                const newRef = doc(db, 'participants', `${newCategoryId}_${pId}`);
+                batch.set(newRef, { ...data, categoryId: newCategoryId });
+                batch.delete(oldRef);
+            }
+        }
+        await batch.commit();
+    },
+
     seedRandomScores: async (yearId) => {
         const { years, participants, scoringItems } = get();
         const year = years.find(y => y.id === yearId);
@@ -321,6 +345,27 @@ const useStore = create((set, get) => ({
             }
         });
 
+        // Set global sync complete after a short delay or when critical data arrives
+        // For simplicity, we just check if years/judges/participants snapshots have run at least once
+        let collectionsSynced = { years: false, judges: false, participants: false, admins: false, scores: false };
+        const checkAllSynced = (key) => {
+            collectionsSynced[key] = true;
+            console.log(`[Sync] Collection synced: ${key} (${Object.values(collectionsSynced).filter(Boolean).length}/5)`);
+            if (Object.values(collectionsSynced).every(v => v)) {
+                set({ isInitialSyncComplete: true });
+                get().syncUserRole(); // One final check
+            }
+        };
+
+        // Safety timeout: If sync takes too long (e.g. empty DB or network issue), force complete
+        setTimeout(() => {
+            if (!get().isInitialSyncComplete) {
+                console.warn('[Sync] Safety timeout reached. Forcing sync complete.');
+                set({ isInitialSyncComplete: true });
+                get().syncUserRole();
+            }
+        }, 5000);
+
         // Sync Years
         onSnapshot(collection(db, 'years'), (snapshot) => {
             const years = snapshot.docs.map(doc => doc.data());
@@ -330,6 +375,7 @@ const useStore = create((set, get) => ({
             if (years.length === 0) {
                 get().initDefaults();
             }
+            checkAllSynced('years');
         });
 
         // Sync Judges
@@ -341,6 +387,8 @@ const useStore = create((set, get) => ({
                 grouped[j.yearId].push(j);
             });
             set({ judgesByYear: grouped });
+            get().syncUserRole();
+            checkAllSynced('judges');
         });
 
         // Sync Participants
@@ -352,12 +400,15 @@ const useStore = create((set, get) => ({
                 participantsByCat[p.categoryId].push(p);
             });
             set({ participants: participantsByCat });
+            checkAllSynced('participants');
         });
 
         // Sync Admins
         onSnapshot(collection(db, 'admins'), (snapshot) => {
             const admins = snapshot.docs.map(doc => doc.data());
             set({ admins });
+            get().syncUserRole();
+            checkAllSynced('admins');
         });
 
         // Sync Scores
@@ -372,6 +423,7 @@ const useStore = create((set, get) => ({
                 scoresMap[catId][pId][jEmail] = data.values;
             });
             set({ scores: scoresMap });
+            checkAllSynced('scores');
         });
     },
 
