@@ -9,7 +9,7 @@ function cn(...inputs) {
     return twMerge(clsx(inputs));
 }
 
-const Sidebar = () => {
+const Sidebar = ({ width }) => {
     const {
         years,
         selectedCategoryId,
@@ -115,7 +115,7 @@ const Sidebar = () => {
     const userRole = currentUser?.role || 'USER';
 
     return (
-        <aside className="w-80 h-full glass border-r border-white/10 flex flex-col z-20">
+        <aside className="h-full glass border-r border-white/10 flex flex-col z-20 shrink-0" style={{ width }}>
             {(userRole === 'ADMIN' || userRole === 'ROOT_ADMIN') && (
                 <div className="p-4 pb-0">
                     <button
