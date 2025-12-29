@@ -181,7 +181,7 @@ const Sidebar = ({ width }) => {
 
             <div className="flex-1 overflow-y-auto py-6 px-4 space-y-2 custom-scrollbar">
                 <div className="flex items-center justify-between px-2 mb-4">
-                    <h2 className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Competition Hierarchy</h2>
+                    <h2 className="text-[12px] font-black text-slate-400 uppercase tracking-widest">Competition Hierarchy</h2>
                     {(userRole === 'ADMIN' || userRole === 'ROOT_ADMIN') && (
                         <button
                             onClick={() => setIsAddingYear(!isAddingYear)}
@@ -229,7 +229,7 @@ const Sidebar = ({ width }) => {
                                 >
                                     {expandedYears[year.id] ? <ChevronDown size={14} className="mr-2 text-indigo-400" /> : <ChevronRight size={14} className="mr-2 text-slate-600" />}
                                     <Calendar size={14} className={cn("mr-3 transition-colors", expandedYears[year.id] ? "text-indigo-400" : "text-slate-600")} />
-                                    <span className={cn("flex-1 text-left font-bold transition-colors", expandedYears[year.id] ? "text-white" : "text-slate-400")}>{year.name}</span>
+                                    <span className={cn("flex-1 text-left font-bold transition-colors text-sm", expandedYears[year.id] ? "text-white" : "text-slate-400")}>{year.name}</span>
 
                                     {(userRole === 'ADMIN' || userRole === 'ROOT_ADMIN') && (
                                         <div className="flex items-center gap-1 opacity-0 group-hover/btn:opacity-100 transition-opacity mr-2">
@@ -302,7 +302,7 @@ const Sidebar = ({ width }) => {
                                                         <div className="absolute left-0 w-1 h-4 bg-indigo-500 rounded-full" />
                                                     )}
                                                     <Layers size={12} className={selectedCategoryId === cat.id ? "text-indigo-400" : "text-slate-700"} />
-                                                    <span className="flex-1 text-[11px] font-bold tracking-tight text-left">{cat.name}</span>
+                                                    <span className="flex-1 text-[13px] font-bold tracking-tight text-left">{cat.name}</span>
 
                                                     {(userRole === 'ADMIN' || userRole === 'ROOT_ADMIN') && (
                                                         <div className="flex items-center gap-1 opacity-0 group-hover/cat:opacity-100 transition-opacity mr-2">
