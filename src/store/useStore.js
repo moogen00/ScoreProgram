@@ -13,7 +13,7 @@ import {
     writeBatch
 } from 'firebase/firestore';
 
-const ROOT_ADMIN_EMAILS = ['moogen00@gmail.com'];
+const ROOT_ADMIN_EMAILS = (import.meta.env.VITE_ROOT_ADMIN_EMAILS || '').split(',').map(e => e.trim());
 const ADMIN_EMAILS = []; // Deprecated/Unused for hardcoding, using DB 'admins' collection now
 
 const useStore = create((set, get) => ({
