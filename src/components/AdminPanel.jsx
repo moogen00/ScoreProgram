@@ -13,7 +13,7 @@ const AdminPanel = () => {
         scoringItems, addScoringItem, removeScoringItem, updateScoringItemOrder,
         judgesByYear, addJudge, removeJudge,
         participants, addParticipant, removeParticipant, updateParticipant,
-        selectedCategoryId, years, addYear, updateYear, deleteYear,
+        selectedCategoryId, years,
         addCategory, updateCategory, deleteCategory, moveCategory, sortCategoriesByName, toggleYearLock,
         admins, addAdmin, removeAdmin, competitionName, setCompetitionName,
         seedRandomScores, clearYearScores,
@@ -34,9 +34,6 @@ const AdminPanel = () => {
     const [manageCatId, setManageCatId] = useState('');
 
     // Hierarchy Management states
-    const [newYearName, setNewYearName] = useState('');
-    const [newCatName, setNewCatName] = useState('');
-    const [editingYearId, setEditingYearId] = useState(null);
     const [editingCatId, setEditingCatId] = useState(null);
     const [editValue, setEditValue] = useState('');
 
@@ -51,7 +48,7 @@ const AdminPanel = () => {
     // Find info for current category
     const findCatInfo = () => {
         for (const year of years) {
-            const cat = year.categories.find(c => c.id === selectedCategoryId);
+            const cat = (year.categories || []).find(c => c.id === selectedCategoryId);
             if (cat) return { yearName: year.name, catName: cat.name };
         }
         return { yearName: '?', catName: 'None' };
@@ -105,7 +102,7 @@ const AdminPanel = () => {
         if (!year) return [];
 
         const all = [];
-        year.categories.forEach(cat => {
+        (year.categories || []).forEach(cat => {
             const catPs = participants[cat.id] || [];
             const sortedCatPs = [...catPs].sort((a, b) =>
                 a.number.localeCompare(b.number, undefined, { numeric: true })
@@ -140,7 +137,6 @@ const AdminPanel = () => {
                 <div className="flex bg-black/40 p-1 rounded-xl border border-white/10 shadow-inner overflow-x-auto">
                     {[
                         { id: 'scoring', label: '채점 항목', icon: List },
-                        { id: 'hierarchy', label: '대회 구조', icon: Layout },
                         { id: 'participants', label: '참가자 관리', icon: Users },
                         { id: 'judges', label: '심사위원 관리', icon: Shield },
                         { id: 'settings', label: '설정', icon: Settings },
@@ -197,106 +193,6 @@ const AdminPanel = () => {
                 </div>
             )}
 
-            {activeTab === 'hierarchy' && (
-                <div className="space-y-6">
-                    <div className="glass-card p-8 animate-in fade-in slide-in-from-bottom-2 duration-500">
-                        <div className="flex items-center gap-2 mb-6">
-                            <Plus className="text-rose-400" />
-                            <h2 className="text-xl font-bold text-white">연도(대회) 추가</h2>
-                        </div>
-                        <div className="flex gap-4">
-                            <input
-                                type="text"
-                                value={newYearName}
-                                onChange={(e) => setNewYearName(e.target.value)}
-                                placeholder="예: 2027"
-                                className="flex-1 bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-white outline-none"
-                            />
-                            <button
-                                onClick={() => { if (newYearName) { addYear(newYearName); setNewYearName(''); } }}
-                                className="bg-rose-600 hover:bg-rose-500 text-white px-8 py-3 rounded-xl font-bold"
-                            >추가</button>
-                        </div>
-                    </div>
-
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                        {years.map(year => (
-                            <div key={year.id} className="glass-card p-6 space-y-4">
-                                <div className="flex items-center justify-between border-b border-white/5 pb-4">
-                                    {editingYearId === year.id ? (
-                                        <div className="flex gap-2 w-full">
-                                            <input
-                                                className="bg-black/60 border border-white/20 rounded px-2 py-1 text-white w-full"
-                                                value={editValue}
-                                                onChange={(e) => setEditValue(e.target.value)}
-                                            />
-                                            <button onClick={() => { updateYear(year.id, editValue); setEditingYearId(null); }} className="text-xs bg-emerald-600 px-2 py-1 rounded">저장</button>
-                                            <button onClick={() => setEditingYearId(null)} className="text-xs bg-slate-600 px-2 py-1 rounded">취소</button>
-                                        </div>
-                                    ) : (
-                                        <>
-                                            <h3 className="text-xl font-black text-rose-400">{year.name}</h3>
-                                            <div className="flex gap-4 items-center">
-                                                <button
-                                                    onClick={() => toggleYearLock(year.id, !year.locked)}
-                                                    className={cn(
-                                                        "flex items-center gap-1 px-3 py-1 rounded-full text-[10px] font-black transition-all",
-                                                        year.locked ? "bg-rose-500 text-white" : "bg-emerald-500/20 text-emerald-400 hover:bg-emerald-500/40"
-                                                    )}
-                                                >
-                                                    {year.locked ? <><Lock size={10} /> LOCKED</> : <><Unlock size={10} /> ACTIVE</>}
-                                                </button>
-                                                <div className="flex gap-2">
-                                                    <button onClick={() => { setEditingYearId(year.id); setEditValue(year.name); }} className="text-xs text-slate-400 hover:text-white">수정</button>
-                                                    <button onClick={() => deleteYear(year.id)} className="text-xs text-rose-400/50 hover:text-rose-400 transition-colors">삭제</button>
-                                                </div>
-                                            </div>
-                                        </>
-                                    )}
-                                </div>
-                                <div className="space-y-2">
-                                    <div className="flex justify-between items-center mb-2 px-1">
-                                        <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Categories</span>
-                                        <div className="flex gap-2">
-                                            <button onClick={() => sortCategoriesByName(year.id, 'asc')} className="flex items-center gap-1 text-[10px] font-black text-indigo-400 hover:text-white transition-colors"><SortAsc size={10} /> A-Z</button>
-                                            <button onClick={() => sortCategoriesByName(year.id, 'desc')} className="flex items-center gap-1 text-[10px] font-black text-rose-400 hover:text-white transition-colors"><SortAsc size={10} className="rotate-180" /> Z-A</button>
-                                        </div>
-                                    </div>
-                                    {[...(year.categories || [])].sort((a, b) => (a.order || 0) - (b.order || 0)).map((cat, index, arr) => (
-                                        <div key={cat.id} className="flex items-center justify-between bg-white/5 p-3 rounded-lg group hover:bg-white/10 transition-all">
-                                            {editingCatId === cat.id ? (
-                                                <div className="flex gap-2 w-full">
-                                                    <input className="bg-black/60 border border-white/20 rounded px-2 py-1 text-white text-sm w-full outline-none focus:border-indigo-500" value={editValue} onChange={(e) => setEditValue(e.target.value)} autoFocus />
-                                                    <button onClick={() => { updateCategory(year.id, cat.id, editValue); setEditingCatId(null); }} className="text-[10px] bg-emerald-600 px-2 py-1 rounded">저장</button>
-                                                    <button onClick={() => setEditingCatId(null)} className="text-[10px] bg-slate-600 px-2 py-1 rounded">취소</button>
-                                                </div>
-                                            ) : (
-                                                <>
-                                                    <div className="flex items-center gap-3">
-                                                        <span className="text-[10px] font-black text-slate-600 w-4">{index + 1}</span>
-                                                        <span className="text-sm font-bold text-white/80">{cat.name}</span>
-                                                    </div>
-                                                    <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                                                        <button onClick={() => moveCategory(year.id, cat.id, -1)} disabled={index === 0} className="p-1 text-slate-500 hover:text-white disabled:opacity-0"><ArrowUp size={14} /></button>
-                                                        <button onClick={() => moveCategory(year.id, cat.id, 1)} disabled={index === arr.length - 1} className="p-1 text-slate-500 hover:text-white disabled:opacity-0"><ArrowDown size={14} /></button>
-                                                        <div className="w-px h-4 bg-white/10 mx-1 self-center" />
-                                                        <button onClick={() => { setEditingCatId(cat.id); setEditValue(cat.name); }} className="text-[10px] text-slate-500 hover:text-white px-1">수정</button>
-                                                        <button onClick={() => deleteCategory(year.id, cat.id)} className="text-[10px] text-rose-500/40 hover:text-rose-500 px-1">삭제</button>
-                                                    </div>
-                                                </>
-                                            )}
-                                        </div>
-                                    ))}
-                                    <div className="pt-2">
-                                        <input className="bg-black/40 border border-white/10 rounded-lg px-3 py-2 text-xs text-white w-full" placeholder="새 종목 추가..." onKeyDown={(e) => { if (e.key === 'Enter' && e.target.value) { addCategory(year.id, e.target.value); e.target.value = ''; } }} />
-                                    </div>
-                                </div>
-                            </div>
-                        ))}
-                    </div>
-                </div>
-            )}
-
             {activeTab === 'participants' && (
                 <div className="glass-card p-8 animate-in fade-in slide-in-from-bottom-2 duration-500">
                     <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-8">
@@ -311,7 +207,7 @@ const AdminPanel = () => {
                             </select>
                             <select value={manageCatId} onChange={(e) => setManageCatId(e.target.value)} disabled={!manageYearId} className="bg-black/40 border border-white/10 rounded-xl px-4 py-2 text-white text-xs outline-none disabled:opacity-30">
                                 <option value="">종목 선택</option>
-                                {years.find(y => y.id === manageYearId)?.categories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                                {years.find(y => y.id === manageYearId)?.categories?.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
                             </select>
                         </div>
                     </div>

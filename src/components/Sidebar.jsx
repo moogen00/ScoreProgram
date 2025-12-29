@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { ChevronDown, ChevronRight, Trophy, Calendar, Plus, Edit2, Check, User, Layers, LogOut, Lock, Unlock, Settings } from 'lucide-react';
+import { ChevronDown, ChevronRight, Trophy, Calendar, Plus, Edit2, Check, User, Layers, LogOut, Lock, Unlock, Settings, Trash2 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import useStore from '../store/useStore';
 import { clsx } from 'clsx';
@@ -19,10 +19,14 @@ const Sidebar = () => {
         currentUser,
         logout,
         addYear,
+        updateYear,
+        deleteYear,
         addCategory,
+        updateCategory,
+        deleteCategory,
+        toggleYearLock,
         competitionName,
         setCompetitionName,
-        updateYear
     } = useStore();
 
     const [expandedYears, setExpandedYears] = useState({ '2025': true });
@@ -39,6 +43,9 @@ const Sidebar = () => {
 
     const [addingCatFor, setAddingCatFor] = useState(null); // yearId
     const [newCatName, setNewCatName] = useState('');
+
+    const [editingCatId, setEditingCatId] = useState(null);
+    const [tempCatName, setTempCatName] = useState('');
 
     const toggleYear = (id) => {
         setExpandedYears(prev => ({ ...prev, [id]: !prev[id] }));
@@ -77,6 +84,34 @@ const Sidebar = () => {
         }
     };
 
+    const handleDeleteYear = (id, name) => {
+        if (window.confirm(`'${name}' 연도와 해당 연도의 모든 종목, 데이터가 삭제됩니다. 정말 삭제하시겠습니까?`)) {
+            deleteYear(id);
+        }
+    };
+
+    const handleToggleYearLock = (id, currentLocked) => {
+        const action = currentLocked ? '해제' : '설정';
+        if (window.confirm(`이 연도의 점수 수정을 ${action}하시겠습니까?`)) {
+            toggleYearLock(id, !currentLocked);
+        }
+    };
+
+    const handleUpdateCategory = (yearId, catId) => {
+        if (tempCatName.trim()) {
+            if (window.confirm('종목 이름을 수정하시겠습니까?')) {
+                updateCategory(yearId, catId, tempCatName.trim());
+                setEditingCatId(null);
+            }
+        }
+    };
+
+    const handleDeleteCategory = (yearId, catId, name) => {
+        if (window.confirm(`'${name}' 종목을 삭제하시겠습니까?`)) {
+            deleteCategory(yearId, catId);
+        }
+    };
+
     const userRole = currentUser?.role || 'USER';
 
     return (
@@ -103,7 +138,10 @@ const Sidebar = () => {
 
             <div className="p-6 border-b border-white/10">
                 <div className="flex items-center gap-3">
-                    <div className="w-10 h-10 rounded-xl bg-indigo-500 flex items-center justify-center shadow-[0_0_20px_rgba(99,102,241,0.4)]">
+                    <div
+                        className="w-10 h-10 rounded-xl bg-indigo-500 flex items-center justify-center shadow-[0_0_20px_rgba(99,102,241,0.4)] cursor-pointer hover:scale-110 active:scale-95 transition-transform"
+                        onClick={() => useStore.getState().resetNavigation()}
+                    >
                         <Trophy className="text-white w-6 h-6" />
                     </div>
                     <div className="flex-1 min-w-0">
@@ -120,7 +158,10 @@ const Sidebar = () => {
                             </div>
                         ) : (
                             <div className="flex items-center justify-between group">
-                                <h1 className="text-xl font-black bg-gradient-to-r from-white to-white/60 bg-clip-text text-transparent truncate cursor-pointer" onClick={() => (userRole === 'ADMIN' || userRole === 'ROOT_ADMIN') && setIsEditingComp(true)}>
+                                <h1
+                                    className="text-xl font-black bg-gradient-to-r from-white to-white/60 bg-clip-text text-transparent truncate cursor-pointer hover:scale-105 transition-transform"
+                                    onClick={() => useStore.getState().resetNavigation()}
+                                >
                                     Score
                                 </h1>
                                 {(userRole === 'ADMIN' || userRole === 'ROOT_ADMIN') && (
@@ -189,18 +230,37 @@ const Sidebar = () => {
                                     {expandedYears[year.id] ? <ChevronDown size={14} className="mr-2 text-indigo-400" /> : <ChevronRight size={14} className="mr-2 text-slate-600" />}
                                     <Calendar size={14} className={cn("mr-3 transition-colors", expandedYears[year.id] ? "text-indigo-400" : "text-slate-600")} />
                                     <span className={cn("flex-1 text-left font-bold transition-colors", expandedYears[year.id] ? "text-white" : "text-slate-400")}>{year.name}</span>
-                                    {year.locked && <Lock size={12} className="text-rose-400 mr-2" />}
+
                                     {(userRole === 'ADMIN' || userRole === 'ROOT_ADMIN') && (
-                                        <Edit2
-                                            size={12}
-                                            className="opacity-0 group-hover/btn:opacity-100 text-slate-500 hover:text-indigo-400 ml-2 transition-all"
-                                            onClick={(e) => {
-                                                e.stopPropagation();
-                                                setEditingYearId(year.id);
-                                                setTempYearName(year.name);
-                                            }}
-                                        />
+                                        <div className="flex items-center gap-1 opacity-0 group-hover/btn:opacity-100 transition-opacity mr-2">
+                                            <button
+                                                onClick={(e) => { e.stopPropagation(); handleToggleYearLock(year.id, year.locked); }}
+                                                className={cn("p-1 rounded hover:bg-white/10", year.locked ? "text-rose-400" : "text-emerald-400")}
+                                                title={year.locked ? "잠금 해제" : "잠금 설정"}
+                                            >
+                                                {year.locked ? <Lock size={12} /> : <Unlock size={12} />}
+                                            </button>
+                                            <button
+                                                onClick={(e) => {
+                                                    e.stopPropagation();
+                                                    setEditingYearId(year.id);
+                                                    setTempYearName(year.name);
+                                                }}
+                                                className="p-1 text-slate-500 hover:text-indigo-400 rounded hover:bg-white/10"
+                                                title="수정"
+                                            >
+                                                <Edit2 size={12} />
+                                            </button>
+                                            <button
+                                                onClick={(e) => { e.stopPropagation(); handleDeleteYear(year.id, year.name); }}
+                                                className="p-1 text-slate-500 hover:text-rose-400 rounded hover:bg-white/10"
+                                                title="삭제"
+                                            >
+                                                <Trash2 size={12} />
+                                            </button>
+                                        </div>
                                     )}
+                                    {year.locked && (userRole !== 'ADMIN' && userRole !== 'ROOT_ADMIN') && <Lock size={12} className="text-rose-400 mr-2" />}
                                 </button>
                             )}
                         </div>
@@ -214,23 +274,62 @@ const Sidebar = () => {
                                     className="overflow-hidden ml-6 border-l border-white/5 space-y-1 my-1"
                                 >
                                     {[...(year.categories || [])].sort((a, b) => (a.order || 0) - (b.order || 0)).map((cat) => (
-                                        <button
-                                            key={cat.id}
-                                            onClick={() => {
-                                                setSelectedCategoryId(cat.id);
-                                                if (userRole === 'ADMIN' || userRole === 'ROOT_ADMIN') setActiveView('scorer');
-                                            }}
-                                            className={cn(
-                                                "sidebar-item w-full flex items-center gap-3 pl-6 relative",
-                                                selectedCategoryId === cat.id && activeView !== 'admin' ? "active text-white" : "text-slate-500"
+                                        <div key={cat.id} className="group/cat relative flex items-center">
+                                            {editingCatId === cat.id ? (
+                                                <div className="flex-1 flex items-center gap-1 mx-6 my-1">
+                                                    <input
+                                                        autoFocus
+                                                        className="bg-white/10 border border-white/20 rounded px-2 py-0.5 text-[10px] w-full outline-none text-white"
+                                                        value={tempCatName}
+                                                        onChange={(e) => setTempCatName(e.target.value)}
+                                                        onKeyDown={(e) => e.key === 'Enter' && handleUpdateCategory(year.id, cat.id)}
+                                                    />
+                                                    <button onClick={() => handleUpdateCategory(year.id, cat.id)} className="text-emerald-400 p-1"><Check size={12} /></button>
+                                                    <button onClick={() => setEditingCatId(null)} className="text-slate-400 p-1">×</button>
+                                                </div>
+                                            ) : (
+                                                <button
+                                                    onClick={() => {
+                                                        setSelectedCategoryId(cat.id);
+                                                        if (userRole === 'ADMIN' || userRole === 'ROOT_ADMIN') setActiveView('scorer');
+                                                    }}
+                                                    className={cn(
+                                                        "sidebar-item w-full flex items-center gap-3 pl-6 relative",
+                                                        selectedCategoryId === cat.id && activeView !== 'admin' ? "active text-white" : "text-slate-500"
+                                                    )}
+                                                >
+                                                    {selectedCategoryId === cat.id && (
+                                                        <div className="absolute left-0 w-1 h-4 bg-indigo-500 rounded-full" />
+                                                    )}
+                                                    <Layers size={12} className={selectedCategoryId === cat.id ? "text-indigo-400" : "text-slate-700"} />
+                                                    <span className="flex-1 text-[11px] font-bold tracking-tight text-left">{cat.name}</span>
+
+                                                    {(userRole === 'ADMIN' || userRole === 'ROOT_ADMIN') && (
+                                                        <div className="flex items-center gap-1 opacity-0 group-hover/cat:opacity-100 transition-opacity mr-2">
+                                                            <button
+                                                                onClick={(e) => {
+                                                                    e.stopPropagation();
+                                                                    setEditingCatId(cat.id);
+                                                                    setTempCatName(cat.name);
+                                                                }}
+                                                                className="text-slate-500 hover:text-indigo-400"
+                                                            >
+                                                                <Edit2 size={10} />
+                                                            </button>
+                                                            <button
+                                                                onClick={(e) => {
+                                                                    e.stopPropagation();
+                                                                    handleDeleteCategory(year.id, cat.id, cat.name);
+                                                                }}
+                                                                className="text-slate-500 hover:text-rose-400"
+                                                            >
+                                                                <Trash2 size={10} />
+                                                            </button>
+                                                        </div>
+                                                    )}
+                                                </button>
                                             )}
-                                        >
-                                            {selectedCategoryId === cat.id && (
-                                                <div className="absolute left-0 w-1 h-4 bg-indigo-500 rounded-full" />
-                                            )}
-                                            <Layers size={12} className={selectedCategoryId === cat.id ? "text-indigo-400" : "text-slate-700"} />
-                                            <span className="text-[11px] font-bold tracking-tight">{cat.name}</span>
-                                        </button>
+                                        </div>
                                     ))}
 
                                     {addingCatFor === year.id ? (

@@ -11,6 +11,23 @@ function App() {
 
     React.useEffect(() => {
         initSync();
+
+        // Handle back/forward navigation
+        const handlePopState = (event) => {
+            if (event.state) {
+                const { activeView, selectedCategoryId } = event.state;
+                useStore.setState({ activeView, selectedCategoryId });
+            }
+        };
+
+        window.addEventListener('popstate', handlePopState);
+
+        // Push initial state
+        if (!window.history.state) {
+            window.history.replaceState({ activeView: null, selectedCategoryId: '' }, '');
+        }
+
+        return () => window.removeEventListener('popstate', handlePopState);
     }, [initSync]);
 
     if (!currentUser) {

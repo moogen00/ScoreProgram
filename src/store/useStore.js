@@ -55,8 +55,18 @@ const useStore = create((set, get) => ({
     setCompetitionName: async (name) => {
         await setDoc(doc(db, 'settings', 'general'), { competitionName: name }, { merge: true });
     },
-    setSelectedCategoryId: (id) => set({ selectedCategoryId: id }),
-    setActiveView: (view) => set({ activeView: view }),
+    setSelectedCategoryId: (id) => {
+        set({ selectedCategoryId: id });
+        window.history.pushState({ activeView: get().activeView, selectedCategoryId: id }, '');
+    },
+    setActiveView: (view) => {
+        set({ activeView: view });
+        window.history.pushState({ activeView: view, selectedCategoryId: get().selectedCategoryId }, '');
+    },
+    resetNavigation: () => {
+        set({ activeView: null, selectedCategoryId: '' });
+        window.history.pushState({ activeView: null, selectedCategoryId: '' }, '');
+    },
 
     // Scorer Actions
     updateScore: async (categoryId, participantId, itemId, score) => {
