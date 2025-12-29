@@ -33,14 +33,34 @@ const useStore = create((set, get) => ({
 
     // Auth Actions
     login: (userData) => {
-        set({ currentUser: { ...userData, role: 'USER' } });
+        // If userData has a role (e.g. from Spectator login), use it. Default to USER.
+        const role = userData.role || 'USER';
+        set({ currentUser: { ...userData, role } });
         get().syncUserRole();
+
+        // Force refresh scores to ensure we get data if rules were restrictive before login
+        get().refreshScores();
     },
-    logout: () => set({ currentUser: null }),
+    logout: () => {
+        set({ currentUser: null });
+        // Optional: clear scores or unsubscribe
+        const { unsubScores } = get();
+        if (unsubScores) unsubScores();
+        set({ scores: {}, unsubScores: null });
+    },
 
     syncUserRole: () => {
         const { currentUser, judgesByYear, admins } = get();
         if (!currentUser) return;
+
+        // If explicitly Spectator, FORCE role assignment and don't overwrite
+        if (currentUser.email === 'guest@score.com') {
+            if (currentUser.role !== 'SPECTATOR') {
+                set({ currentUser: { ...currentUser, role: 'SPECTATOR' } });
+                console.log(`[Auth] User Role corrected: ${currentUser.email} -> SPECTATOR`);
+            }
+            return;
+        }
 
         let role = 'USER';
         const allJudgesEmails = Object.values(judgesByYear).flat().map(j => j.email);
@@ -321,7 +341,50 @@ const useStore = create((set, get) => ({
     },
 
     // Firebase Initialization & Sync
+    // Sync state helpers
+    unsubScores: null,
+
+    refreshScores: () => {
+        const { unsubScores, checkAllSynced } = get();
+        if (unsubScores) unsubScores();
+
+        console.log('[Sync] Starting Scores refresh...');
+        const unsub = onSnapshot(collection(db, 'scores'),
+            (snapshot) => {
+                const scoresMap = {};
+                snapshot.docs.forEach(doc => {
+                    const data = doc.data();
+                    const parts = doc.id.split('_');
+                    if (parts.length < 3) return;
+
+                    const catId = parts[0];
+                    const pId = parts[1];
+                    const jEmail = parts.slice(2).join('_'); // Handle emails with underscores if any
+
+                    if (!scoresMap[catId]) scoresMap[catId] = {};
+                    if (!scoresMap[catId][pId]) scoresMap[catId][pId] = {};
+                    scoresMap[catId][pId][jEmail] = data.values;
+                });
+                set({ scores: scoresMap });
+                console.log(`[Sync] Scores updated. Categories: ${Object.keys(scoresMap).length}`);
+
+                // Helper to mark synced if checkAllSynced is available
+                // Note: checkAllSynced is local to initSync scope, so we just set state directly if needed
+                // or we rely on the implementation below.
+            },
+            (error) => {
+                console.error('[Sync] Scores sync error:', error);
+                if (error.code === 'permission-denied') {
+                    console.warn('[Sync] Permission denied. Waiting for auth...');
+                }
+            }
+        );
+        set({ unsubScores: unsub });
+    },
+
     initSync: () => {
+        const { refreshScores } = get();
+
         // Sync General Settings
         onSnapshot(doc(db, 'settings', 'general'), (docSnap) => {
             if (docSnap.exists()) {
@@ -345,19 +408,17 @@ const useStore = create((set, get) => ({
             }
         });
 
-        // Set global sync complete after a short delay or when critical data arrives
-        // For simplicity, we just check if years/judges/participants snapshots have run at least once
-        let collectionsSynced = { years: false, judges: false, participants: false, admins: false, scores: false };
+        // Local scoped sync tracker
+        let collectionsSynced = { years: false, judges: false, participants: false, admins: false };
         const checkAllSynced = (key) => {
             collectionsSynced[key] = true;
-            console.log(`[Sync] Collection synced: ${key} (${Object.values(collectionsSynced).filter(Boolean).length}/5)`);
             if (Object.values(collectionsSynced).every(v => v)) {
                 set({ isInitialSyncComplete: true });
-                get().syncUserRole(); // One final check
+                get().syncUserRole();
             }
         };
 
-        // Safety timeout: If sync takes too long (e.g. empty DB or network issue), force complete
+        // Safety timeout
         setTimeout(() => {
             if (!get().isInitialSyncComplete) {
                 console.warn('[Sync] Safety timeout reached. Forcing sync complete.');
@@ -370,11 +431,7 @@ const useStore = create((set, get) => ({
         onSnapshot(collection(db, 'years'), (snapshot) => {
             const years = snapshot.docs.map(doc => doc.data());
             set({ years: years.sort((a, b) => b.name.localeCompare(a.name)) });
-
-            // Check if hierarchy needs initialization
-            if (years.length === 0) {
-                get().initDefaults();
-            }
+            if (years.length === 0) get().initDefaults();
             checkAllSynced('years');
         });
 
@@ -411,20 +468,8 @@ const useStore = create((set, get) => ({
             checkAllSynced('admins');
         });
 
-        // Sync Scores
-        onSnapshot(collection(db, 'scores'), (snapshot) => {
-            const scoresMap = {};
-            snapshot.docs.forEach(doc => {
-                const data = doc.data();
-                // Doc ID format: categoryId_participantId_judgeEmail
-                const [catId, pId, jEmail] = doc.id.split('_');
-                if (!scoresMap[catId]) scoresMap[catId] = {};
-                if (!scoresMap[catId][pId]) scoresMap[catId][pId] = {};
-                scoresMap[catId][pId][jEmail] = data.values;
-            });
-            set({ scores: scoresMap });
-            checkAllSynced('scores');
-        });
+        // Initial Score Sync
+        refreshScores();
     },
 
     initDefaults: async () => {

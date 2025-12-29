@@ -292,7 +292,7 @@ const Sidebar = ({ width }) => {
                                                     onClick={() => {
                                                         console.log(`[Sidebar] Category clicked: ${cat.name} (ID: ${cat.id})`);
                                                         setSelectedCategoryId(cat.id);
-                                                        if (userRole === 'ADMIN' || userRole === 'ROOT_ADMIN' || userRole === 'JUDGE') {
+                                                        if (['ADMIN', 'ROOT_ADMIN', 'JUDGE', 'SPECTATOR'].includes(userRole)) {
                                                             setActiveView('scorer');
                                                         }
                                                     }}

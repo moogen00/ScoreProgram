@@ -31,12 +31,22 @@ const Scorer = () => {
     const isYearLocked = currentYear?.locked;
     const isAdmin = currentUser?.role === 'ADMIN' || currentUser?.role === 'ROOT_ADMIN';
     const isJudge = currentUser?.role === 'JUDGE';
+    const isSpectator = currentUser?.role === 'SPECTATOR';
     const isJudgeForThisYear = judgesByYear[currentYearId]?.some(j => j.email === currentUser?.email);
 
     // Auth: Everyone can view, but only Admin/Assigned Judge can edit
     const isAuthorized = true;
     const canEdit = isAdmin || isJudge;
     const isLocked = (isYearLocked && !isAdmin) || !canEdit;
+
+    console.log('[Scorer Debug]', {
+        email: currentUser?.email,
+        role: currentUser?.role,
+        isSpectator,
+        isLocked,
+        isYearLocked,
+        selectedCategoryId
+    });
 
     // Initialize local scores from store
     useEffect(() => {
@@ -48,7 +58,7 @@ const Scorer = () => {
             initialScores[p.id] = { ...userScores };
         });
         setLocalScores(initialScores);
-    }, [selectedCategoryId, scores, participants, currentUser]);
+    }, [selectedCategoryId, currentUser, scores, categoryParticipants]);
 
     const handleScoreChange = (participantId, itemId, val) => {
         if (isLocked) return;
@@ -96,46 +106,33 @@ const Scorer = () => {
     }, [localScores]);
 
     // Sort scoring items
-    const sortedItems = [...scoringItems].sort((a, b) => a.order - b.order);
+    // Helper to get total score for sorting/display
+    const getParticipantTotal = useCallback((pId) => {
+        // Condition: Admin (Monitoring) OR Spectator (Locked) OR Admin (Locked - rare)
+        // Basically if we are showing averages, we calculate total from averages.
+        if ((isAdmin && !isJudgeForThisYear) || (isSpectator && isLocked)) {
+            // Calculate Average Total from all judges
+            const pScoresByJudge = scores[selectedCategoryId]?.[pId] || {};
+            const judgeEmails = Object.keys(pScoresByJudge);
+            if (judgeEmails.length === 0) return 0;
 
-    // Sort participants by Number
-    const sortedParticipants = useMemo(() => {
-        return [...categoryParticipants].sort((a, b) => {
-            const numA = parseInt(a.number) || 0;
-            const numB = parseInt(b.number) || 0;
-            return numA - numB;
-        });
-    }, [categoryParticipants]);
-
-    // Calculate Rankings
-    const topRanked = useMemo(() => {
-        const withScores = sortedParticipants.map(p => {
-            let totalVal = 0;
-            if (isAdmin) {
-                // For admin, use average of all judges
-                const pScoresByJudge = scores[selectedCategoryId]?.[p.id] || {};
-                const judgeEmails = Object.keys(pScoresByJudge);
-                if (judgeEmails.length > 0) {
-                    let sumOfTotals = 0;
-                    judgeEmails.forEach(email => {
-                        const vals = pScoresByJudge[email] || {};
-                        const judgeTotal = Object.values(vals).reduce((s, v) => s + (parseFloat(v) || 0), 0);
-                        sumOfTotals += judgeTotal;
-                    });
-                    totalVal = sumOfTotals / judgeEmails.length;
-                }
-            } else {
-                totalVal = parseFloat(calculateTotal(p.id));
-            }
-            return { ...p, total: parseFloat(totalVal.toFixed(1)) };
-        }).filter(p => p.total > 0);
-
-        return withScores.sort((a, b) => b.total - a.total).slice(0, 3);
-    }, [sortedParticipants, calculateTotal, isAdmin, scores, selectedCategoryId]);
+            let sumOfTotals = 0;
+            judgeEmails.forEach(email => {
+                const vals = pScoresByJudge[email] || {};
+                const judgeTotal = Object.values(vals).reduce((s, v) => s + (parseFloat(v) || 0), 0);
+                sumOfTotals += judgeTotal;
+            });
+            return parseFloat((sumOfTotals / judgeEmails.length).toFixed(1));
+        } else {
+            // Judge: Use local/own total
+            return parseFloat(calculateTotal(pId));
+        }
+    }, [isAdmin, isSpectator, isLocked, isJudgeForThisYear, scores, selectedCategoryId, calculateTotal]);
 
     // Helper for Admin View
-    const getAdminItemStats = (pId, itemId) => {
+    const getAdminItemStats = useCallback((pId, itemId) => {
         const pScoresByJudge = scores[selectedCategoryId]?.[pId] || {};
+        const yearJudges = judgesByYear?.[currentYearId] || [];
         const judgeEmails = Object.keys(pScoresByJudge);
         const stats = { avg: 0, breakdown: [] };
 
@@ -152,20 +149,39 @@ const Scorer = () => {
 
                 // Find judge name
                 let judgeName = email.split('@')[0];
-                for (const yearId in judgesByYear) {
-                    const found = judgesByYear[yearId].find(j => j.email === email);
-                    if (found) {
-                        judgeName = found.name;
-                        break;
-                    }
-                }
+                const judgeObj = yearJudges.find(j => j.email === email);
+                if (judgeObj) judgeName = judgeObj.name;
+
                 stats.breakdown.push({ name: judgeName, score: num });
             }
         });
 
-        if (count > 0) stats.avg = sum / count;
+        if (count > 0) {
+            stats.avg = sum / count;
+        }
         return stats;
-    };
+    }, [scores, selectedCategoryId, judgesByYear, currentYearId]);
+
+    // Helper for Spectator Item View
+    const getAverageItemScore = useCallback((pId, itemId) => {
+        const stats = getAdminItemStats(pId, itemId);
+        return stats.avg > 0 ? stats.avg.toFixed(1) : '-';
+    }, [getAdminItemStats]);
+
+    // Sort scoring items
+    const sortedItems = [...scoringItems].sort((a, b) => a.order - b.order);
+
+    // Sort participants by correct total score (descending)
+    const sortedParticipants = useMemo(() => {
+        return [...categoryParticipants].sort((a, b) => {
+            const totalA = getParticipantTotal(a.id);
+            const totalB = getParticipantTotal(b.id);
+            return totalB - totalA;
+        });
+    }, [categoryParticipants, getParticipantTotal]);
+
+    // Top Ranked for Widget
+    const topRanked = sortedParticipants.slice(0, 3).filter(p => getParticipantTotal(p.id) > 0);
 
     if (!isAuthorized) {
         return (
@@ -226,23 +242,23 @@ const Scorer = () => {
                 </div>
 
                 <div className="flex items-center gap-3">
-                    {(isLocked && !canEdit && !isAdmin) && (
-                        <div className="bg-slate-500/20 border border-slate-500/50 px-4 py-2 rounded-lg flex items-center gap-2 text-slate-400 font-bold">
-                            <Lock size={16} />
-                            <span>READ ONLY</span>
-                        </div>
-                    )}
-                    {(isLocked && (isAdmin || canEdit)) && (
+                    {(isLocked) && (
                         <div className="bg-rose-500/20 border border-rose-500/50 px-4 py-2 rounded-lg flex items-center gap-2 text-rose-400 font-bold animate-pulse">
                             <Lock size={16} />
                             <span>LOCKED</span>
                         </div>
                     )}
+                    {(!isLocked) && (
+                        <div className="bg-emerald-500/20 border border-emerald-500/50 px-4 py-2 rounded-lg flex items-center gap-2 text-emerald-400 font-bold">
+                            <PenTool size={16} />
+                            <span>ACTIVE</span>
+                        </div>
+                    )}
                 </div>
             </div>
 
-            {/* Top 3 Ranking Widget (Admin Only) */}
-            {(isAdmin && topRanked.length > 0) && (
+            {/* Top 3 Ranking Widget (Admin Only OR Spectator if Locked) */}
+            {((isAdmin || (isSpectator && isLocked)) && topRanked.length > 0) && (
                 <div className="grid grid-cols-3 gap-2 md:gap-4 mb-6">
                     {topRanked.map((p, index) => (
                         <div key={p.id} className={`p-3 rounded-xl border ${index === 0 ? 'bg-amber-500/10 border-amber-500/30' : index === 1 ? 'bg-slate-400/10 border-slate-400/30' : 'bg-orange-700/10 border-orange-700/30'} flex flex-col items-center justify-center relative overflow-hidden group`}>
@@ -276,136 +292,138 @@ const Scorer = () => {
             `}</style>
 
             <div className="glass-card overflow-hidden rounded-2xl border border-white/10 shadow-2xl relative">
-                <div className="overflow-x-auto custom-scrollbar">
-                    <table className="w-full text-left border-collapse min-w-max">
-                        <thead>
-                            <tr className="bg-gradient-to-r from-slate-900 to-slate-800 text-xs font-black text-slate-400 uppercase tracking-widest border-b border-white/10">
-                                <th className="sticky left-0 z-20 bg-slate-900/95 backdrop-blur-sm px-4 py-4 w-16 text-center shadow-[1px_0_0_rgba(255,255,255,0.1)]">No.</th>
-                                <th className="sticky left-16 z-20 bg-slate-900/95 backdrop-blur-sm px-4 py-4 min-w-[160px] shadow-[4px_0_10px_rgba(0,0,0,0.5)]">Participant</th>
-                                {sortedItems.map(item => {
-                                    const match = item.label.match(/^([^(]+)(\(([^)]+)\))?$/);
-                                    const mainLabel = match ? match[1].trim() : item.label;
-                                    const subLabel = match && match[3] ? match[3].trim() : '';
-                                    return (
-                                        <th key={item.id} className="px-2 py-4 text-center min-w-[70px]">
-                                            <div className="flex flex-col items-center justify-center leading-tight">
-                                                <span className="text-slate-300 mobile:text-[10px]">{mainLabel}</span>
-                                                {subLabel && <span className="text-[9px] text-slate-600 mt-0.5">{subLabel}</span>}
-                                            </div>
-                                        </th>
-                                    );
-                                })}
-                                <th className="px-4 py-4 w-24 text-center text-indigo-400 sticky right-0 z-20 bg-slate-900/95 backdrop-blur-sm shadow-[-4px_0_10px_rgba(0,0,0,0.5)]">Total</th>
-                            </tr>
-                        </thead>
-                        <tbody className="divide-y divide-white/5">
-                            {sortedParticipants.length === 0 ? (
-                                <tr>
-                                    <td colSpan={3 + sortedItems.length} className="px-6 py-20 text-center">
-                                        <AlertCircle className="mx-auto text-slate-600 mb-4 w-12 h-12" />
-                                        <p className="text-slate-500 font-bold">이 종목에 등록된 참가자가 없습니다.</p>
-                                    </td>
+                {/* Spectator Waiting Screen */}
+                {(isSpectator && !isLocked) ? (
+                    <div className="flex flex-col items-center justify-center py-20 px-4 text-center">
+                        <div className="w-16 h-16 bg-white/5 rounded-full flex items-center justify-center mb-4 animate-pulse">
+                            <Lock className="w-8 h-8 text-slate-500" />
+                        </div>
+                        <h3 className="text-xl font-bold text-white mb-2">결과 집계 중입니다</h3>
+                        <p className="text-slate-400 text-sm max-w-xs">
+                            모든 심사가 완료되고 관리자가 결과를 확정하면<br />순위와 총점을 확인할 수 있습니다.
+                        </p>
+                    </div>
+                ) : (
+                    <div className="overflow-x-auto custom-scrollbar">
+                        <table className="w-full text-left border-collapse min-w-max">
+                            <thead>
+                                <tr className="bg-gradient-to-r from-slate-900 to-slate-800 text-xs font-black text-slate-400 uppercase tracking-widest border-b border-white/10">
+                                    <th className="sticky left-0 z-20 bg-slate-900/95 backdrop-blur-sm px-4 py-4 w-16 text-center shadow-[1px_0_0_rgba(255,255,255,0.1)]">No.</th>
+                                    <th className="sticky left-16 z-20 bg-slate-900/95 backdrop-blur-sm px-4 py-4 min-w-[160px] shadow-[4px_0_10px_rgba(0,0,0,0.5)]">Participant</th>
+                                    {sortedItems.map(item => {
+                                        const match = item.label.match(/^([^(]+)(\(([^)]+)\))?$/);
+                                        const mainLabel = match ? match[1].trim() : item.label;
+                                        const subLabel = match && match[3] ? match[3].trim() : '';
+                                        return (
+                                            <th key={item.id} className="px-2 py-4 text-center min-w-[70px]">
+                                                <div className="flex flex-col items-center justify-center leading-tight">
+                                                    <span className="text-slate-300 mobile:text-[10px]">{mainLabel}</span>
+                                                    {subLabel && <span className="text-[9px] text-slate-600 mt-0.5">{subLabel}</span>}
+                                                </div>
+                                            </th>
+                                        );
+                                    })}
+                                    <th className="px-4 py-4 w-24 text-center text-indigo-400 sticky right-0 z-20 bg-slate-900/95 backdrop-blur-sm shadow-[-4px_0_10px_rgba(0,0,0,0.5)]">Total</th>
                                 </tr>
-                            ) : (
-                                sortedParticipants.map((p) => {
-                                    let displayTotal = 0;
-                                    if (isAdmin) {
-                                        // Calculate average of all judges for this participant
-                                        const pScoresByJudge = scores[selectedCategoryId]?.[p.id] || {};
-                                        const judgeEmails = Object.keys(pScoresByJudge);
-                                        if (judgeEmails.length > 0) {
-                                            let sumOfTotals = 0;
-                                            judgeEmails.forEach(email => {
-                                                const vals = pScoresByJudge[email] || {};
-                                                const judgeTotal = Object.values(vals).reduce((s, v) => s + (parseFloat(v) || 0), 0);
-                                                sumOfTotals += judgeTotal;
-                                            });
-                                            displayTotal = (sumOfTotals / judgeEmails.length).toFixed(1);
-                                        } else {
-                                            displayTotal = '0.0';
-                                        }
-                                    } else {
-                                        displayTotal = calculateTotal(p.id);
-                                    }
+                            </thead>
+                            <tbody className="divide-y divide-white/5">
+                                {sortedParticipants.length === 0 ? (
+                                    <tr>
+                                        <td colSpan={3 + sortedItems.length} className="px-6 py-20 text-center">
+                                            <AlertCircle className="mx-auto text-slate-600 mb-4 w-12 h-12" />
+                                            <p className="text-slate-500 font-bold">이 종목에 등록된 참가자가 없습니다.</p>
+                                        </td>
+                                    </tr>
+                                ) : (
+                                    sortedParticipants.map((p) => {
+                                        const displayTotal = getParticipantTotal(p.id).toFixed(1);
 
-                                    return (
-                                        <tr key={p.id} className="hover:bg-white/[0.02] transition-colors group">
-                                            <td className="sticky left-0 z-10 bg-[#0f172a]/95 backdrop-blur-sm px-4 py-3 text-center font-black text-slate-600 text-lg shadow-[1px_0_0_rgba(255,255,255,0.05)] group-hover:bg-[#151e32]/95 transition-colors">
-                                                {p.number}
-                                            </td>
-                                            <td className="sticky left-16 z-10 bg-[#0f172a]/95 backdrop-blur-sm px-4 py-3 shadow-[4px_0_10px_rgba(0,0,0,0.3)] group-hover:bg-[#151e32]/95 transition-colors text-xs">
-                                                <div className="font-bold text-white text-base truncate max-w-[180px]">{p.name}</div>
-                                            </td>
-                                            {sortedItems.map(item => {
-                                                const isTeamwork = item.label === '팀워크';
-                                                const isDisabled = (isSolo && isTeamwork);
+                                        return (
+                                            <tr key={p.id} className="hover:bg-white/[0.02] transition-colors group">
+                                                <td className="sticky left-0 z-10 bg-[#0f172a]/95 backdrop-blur-sm px-4 py-3 text-center font-black text-slate-600 text-lg shadow-[1px_0_0_rgba(255,255,255,0.05)] group-hover:bg-[#151e32]/95 transition-colors">
+                                                    {p.number}
+                                                </td>
+                                                <td className="sticky left-16 z-10 bg-[#0f172a]/95 backdrop-blur-sm px-4 py-3 shadow-[4px_0_10px_rgba(0,0,0,0.3)] group-hover:bg-[#151e32]/95 transition-colors text-xs">
+                                                    <div className="font-bold text-white text-base truncate max-w-[180px]">{p.name}</div>
+                                                </td>
+                                                {sortedItems.map(item => {
+                                                    // Special handling for Teamwork
+                                                    const isTeamwork = item.label === '팀워크';
+                                                    const isDisabled = (isSolo && isTeamwork);
 
-                                                if (isDisabled) {
-                                                    return (
-                                                        <td key={item.id} className="px-2 py-2 text-center">
-                                                            <div className="text-[10px] font-bold text-slate-700 italic select-none">-</div>
-                                                        </td>
-                                                    );
-                                                }
+                                                    if (isDisabled) {
+                                                        return (
+                                                            <td key={item.id} className="px-2 py-2 text-center">
+                                                                <div className="text-[10px] font-bold text-slate-700 italic select-none">-</div>
+                                                            </td>
+                                                        );
+                                                    }
 
-                                                if (isAdmin) {
-                                                    const stats = getAdminItemStats(p.id, item.id);
+                                                    // Spectator View (Locked) OR Admin Monitoring View
+                                                    if ((isSpectator && isLocked) || (isAdmin && !isJudgeForThisYear)) {
+                                                        const avgScore = getAverageItemScore(p.id, item.id);
+                                                        return (
+                                                            <td key={item.id} className="px-1 py-1">
+                                                                <div className="flex flex-col items-center justify-center p-1 bg-white/[0.03] rounded-lg h-12 border border-white/5">
+                                                                    <div className={cn(
+                                                                        "text-sm font-black tabular-nums",
+                                                                        avgScore !== '-' ? "text-indigo-400" : "text-slate-600"
+                                                                    )}>
+                                                                        {avgScore}
+                                                                    </div>
+                                                                </div>
+                                                            </td>
+                                                        );
+                                                    }
+
+                                                    // Standard Input View (Judge / Admin-Judge)
+                                                    const isActive = localScores[p.id]?.[item.id] !== undefined && localScores[p.id]?.[item.id] !== '';
+
                                                     return (
                                                         <td key={item.id} className="px-1 py-1">
-                                                            <div className="flex flex-col items-center justify-center p-1 bg-white/[0.03] rounded-lg h-12 border border-white/5">
-                                                                <div className="text-sm font-black text-indigo-400 tabular-nums">
-                                                                    {stats.avg > 0 ? stats.avg.toFixed(1) : '-'}
-                                                                </div>
+                                                            <div className={cn(
+                                                                "relative flex items-center justify-center w-full h-12 rounded-lg transition-all border",
+                                                                isActive ? "bg-indigo-500/10 border-indigo-500/30" : "bg-white/5 border-transparent",
+                                                                isLocked && "opacity-40 grayscale-[0.5]"
+                                                            )}>
+                                                                <input
+                                                                    type="number"
+                                                                    inputMode="decimal"
+                                                                    step="0.1"
+                                                                    min="0"
+                                                                    max="10"
+                                                                    disabled={isLocked}
+                                                                    value={localScores[p.id]?.[item.id] ?? ''}
+                                                                    onChange={(e) => handleScoreChange(p.id, item.id, e.target.value)}
+                                                                    onBlur={() => handleBlur(p.id, item.id)}
+                                                                    className={cn(
+                                                                        "w-full h-full bg-transparent text-center font-mono font-bold text-lg outline-none placeholder-white/10",
+                                                                        isActive ? "text-indigo-400" : "text-white",
+                                                                        isLocked ? "cursor-not-allowed" : "focus:text-indigo-400"
+                                                                    )}
+                                                                    placeholder="-"
+                                                                />
+                                                                {isLocked && (
+                                                                    <Lock size={10} className="absolute bottom-1 right-1 text-slate-500" />
+                                                                )}
                                                             </div>
                                                         </td>
                                                     );
-                                                }
+                                                })}
 
-                                                const isActive = localScores[p.id]?.[item.id] !== undefined && localScores[p.id]?.[item.id] !== '';
-
-                                                return (
-                                                    <td key={item.id} className="px-1 py-1">
-                                                        <div className={cn(
-                                                            "relative flex items-center justify-center w-full h-12 rounded-lg transition-all border",
-                                                            isActive ? "bg-indigo-500/10 border-indigo-500/30" : "bg-white/5 border-transparent",
-                                                            isLocked && "opacity-40 grayscale-[0.5]"
-                                                        )}>
-                                                            <input
-                                                                type="number"
-                                                                inputMode="decimal"
-                                                                step="0.1"
-                                                                min="0"
-                                                                max="10"
-                                                                disabled={isLocked}
-                                                                value={localScores[p.id]?.[item.id] ?? ''}
-                                                                onChange={(e) => handleScoreChange(p.id, item.id, e.target.value)}
-                                                                onBlur={() => handleBlur(p.id, item.id)}
-                                                                className={cn(
-                                                                    "w-full h-full bg-transparent text-center font-mono font-bold text-lg outline-none placeholder-white/10",
-                                                                    isActive ? "text-indigo-400" : "text-white",
-                                                                    isLocked ? "cursor-not-allowed" : "focus:text-indigo-400"
-                                                                )}
-                                                                placeholder="-"
-                                                            />
-                                                            {isLocked && !isActive && (
-                                                                <Lock size={10} className="absolute bottom-1 right-1 text-slate-500" />
-                                                            )}
-                                                        </div>
-                                                    </td>
-                                                );
-                                            })}
-                                            <td className="sticky right-0 z-10 bg-[#0f172a]/95 backdrop-blur-sm px-4 py-3 text-center shadow-[-4px_0_10px_rgba(0,0,0,0.3)] group-hover:bg-[#151e32]/95 transition-colors">
-                                                <div className="font-black text-lg text-indigo-400 tabular-nums">
-                                                    {displayTotal}
-                                                </div>
-                                            </td>
-                                        </tr>
-                                    );
-                                })
-                            )}
-                        </tbody>
-                    </table>
-                </div>
+                                                <td className="sticky right-0 z-10 bg-[#0f172a]/95 backdrop-blur-sm px-4 py-3 text-center shadow-[-4px_0_10px_rgba(0,0,0,0.3)] group-hover:bg-[#151e32]/95 transition-colors">
+                                                    <div className="font-black text-lg text-indigo-400 tabular-nums">
+                                                        {displayTotal}
+                                                    </div>
+                                                </td>
+                                            </tr>
+                                        );
+                                    })
+                                )}
+                            </tbody>
+                        </table>
+                    </div>
+                )}
             </div>
 
             {/* Detailed Judge Breakdown Table (Admin Only) */}
@@ -435,7 +453,7 @@ const Scorer = () => {
                                 <tbody>
                                     {sortedParticipants.map((p, pIdx) => {
                                         const pScoresByJudge = scores[selectedCategoryId]?.[p.id] || {};
-                                        const yearJudges = judgesByYear[currentYearId] || [];
+                                        const yearJudges = judgesByYear?.[currentYearId] || [];
 
                                         if (yearJudges.length === 0) return null;
 
