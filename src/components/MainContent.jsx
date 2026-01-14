@@ -10,9 +10,18 @@ const MainContent = () => {
     const activeView = useStore((state) => state.activeView);
     const role = currentUser?.role || 'USER';
 
+    const logout = useStore((state) => state.logout);
+
     const renderContent = () => {
         const isAdmin = role === 'ADMIN' || role === 'ROOT_ADMIN';
         const view = activeView || (isAdmin ? 'admin' : 'scorer');
+
+        if (view === 'admin' && !isAdmin) {
+            // Security breach: Non-admin trying to access admin view
+            alert('비정상적인 접근이 감지되었습니다. 로그아웃 처리됩니다.');
+            logout();
+            return null;
+        }
 
         switch (view) {
             case 'admin':

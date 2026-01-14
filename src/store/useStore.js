@@ -10,7 +10,8 @@ import {
     deleteDoc,
     query,
     getDocs,
-    writeBatch
+    writeBatch,
+    where
 } from 'firebase/firestore';
 
 const ROOT_ADMIN_EMAILS = (import.meta.env.VITE_ROOT_ADMIN_EMAILS || '').split(',').map(e => e.trim());
@@ -20,6 +21,7 @@ const useStore = create((set, get) => ({
     // Auth state
     admins: [], // [ { email, name } ]
     isInitialSyncComplete: false,
+    isSyncInitialized: false,
 
     // Hierarchy & Settings
     competitionName: '...', // Loaded from DB
@@ -117,13 +119,25 @@ const useStore = create((set, get) => ({
         const scoreRef = doc(db, 'scores', docId);
         const snap = await getDoc(scoreRef);
 
+        // Derive granular info from categoryId (Legacy fallback)
+        const parts = categoryId.split('-');
+        const yearVal = parts[0];
+        const genreAndCat = parts.slice(1).join(' ');
+
         const currentValues = snap.exists() ? snap.data().values : {};
         await setDoc(scoreRef, {
+            year: yearVal,
+            genre: genreAndCat.split(' ')[0] || 'General',
+            category: genreAndCat.split(' ').slice(1).join(' ') || genreAndCat,
+            categoryId,
+            participantId,
+            judgeEmail: currentUser.email,
             values: {
                 ...currentValues,
                 [itemId]: parseFloat(score)
-            }
-        });
+            },
+            updatedAt: new Date().toISOString()
+        }, { merge: true });
     },
 
     // Management Actions
@@ -164,13 +178,26 @@ const useStore = create((set, get) => ({
         const catId = `${yearId}-${name.toLowerCase().replace(/\s+/g, '-')}`;
         const yearRef = doc(db, 'years', yearId);
         const yearSnap = await getDoc(yearRef);
+
         if (yearSnap.exists()) {
             const data = yearSnap.data();
-            const categories = [...(data.categories || []), {
+            const yearVal = data.name || yearId;
+
+            // Simple parser: assumes name format might be "Genre Category" or just "Category"
+            const parts = name.split(' ');
+            const genre = parts.length > 1 ? parts[0] : 'General';
+            const category = parts.length > 1 ? parts.slice(1).join(' ') : name;
+
+            const newCategoryObj = {
                 id: catId,
                 name,
+                year: yearVal,
+                genre,
+                category,
                 order: (data.categories?.length || 0)
-            }];
+            };
+
+            const categories = [...(data.categories || []), newCategoryObj];
             await updateDoc(yearRef, { categories });
         }
     },
@@ -213,7 +240,7 @@ const useStore = create((set, get) => ({
         const yearRef = doc(db, 'years', yearId);
         const yearSnap = await getDoc(yearRef);
         if (yearSnap.exists()) {
-            const categories = yearSnap.data().categories.map(c =>
+            const categories = (yearSnap.data().categories || []).map(c =>
                 c.id === categoryId ? { ...c, name: newName } : c
             );
             await updateDoc(yearRef, { categories });
@@ -224,9 +251,19 @@ const useStore = create((set, get) => ({
         const yearRef = doc(db, 'years', yearId);
         const yearSnap = await getDoc(yearRef);
         if (yearSnap.exists()) {
-            const categories = yearSnap.data().categories.filter(c => c.id !== categoryId);
+            const categories = (yearSnap.data().categories || []).filter(c => c.id !== categoryId);
             await updateDoc(yearRef, { categories });
         }
+    },
+
+    updateCategoriesOrder: async (yearId, newCategories) => {
+        const yearRef = doc(db, 'years', yearId);
+        // Ensure to save normalized categories with correct order indexes
+        const normalized = newCategories.map((cat, index) => ({
+            ...cat,
+            order: index
+        }));
+        await updateDoc(yearRef, { categories: normalized });
     },
 
     // Judge Actions
@@ -250,7 +287,140 @@ const useStore = create((set, get) => ({
     // Participant Actions
     addParticipant: async (categoryId, number, name) => {
         const id = Math.random().toString(36).substr(2, 9);
-        await setDoc(doc(db, 'participants', `${categoryId}_${id}`), { id, categoryId, number, name });
+
+        // Derive granular info
+        const parts = categoryId.split('-');
+        const year = parts[0];
+        const genreAndCat = parts.slice(1).join(' ');
+
+        await setDoc(doc(db, 'participants', `${categoryId}_${id}`), {
+            id,
+            categoryId,
+            year,
+            genre: genreAndCat.split(' ')[0] || 'General',
+            category: genreAndCat.split(' ').slice(1).join(' ') || genreAndCat,
+            number,
+            name,
+            createdAt: new Date().toISOString()
+        });
+    },
+
+    getParticipantsByYear: (year) => {
+        const { participants } = get();
+        const allByYear = [];
+        Object.keys(participants).forEach(catId => {
+            if (catId.startsWith(year)) {
+                allByYear.push(...participants[catId]);
+            }
+        });
+        return allByYear;
+    },
+
+    // Data Management Actions
+    exportData: () => {
+        const state = get();
+        const exportObj = {
+            version: "1.1",
+            timestamp: new Date().toISOString(),
+            years: state.years,
+            participants: state.participants,
+            judgesByYear: state.judgesByYear,
+            admins: state.admins,
+            scoringItems: state.scoringItems,
+            settings: state.settings
+        };
+        const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(exportObj, null, 2));
+        const downloadAnchorNode = document.createElement('a');
+        downloadAnchorNode.setAttribute("href", dataStr);
+        downloadAnchorNode.setAttribute("download", `score_program_backup_${new Date().toISOString().split('T')[0]}.json`);
+        document.body.appendChild(downloadAnchorNode);
+        downloadAnchorNode.click();
+        downloadAnchorNode.remove();
+    },
+
+    importData: async (jsonData, mode = 'merge') => {
+        try {
+            const data = typeof jsonData === 'string' ? JSON.parse(jsonData) : jsonData;
+            const batch = writeBatch(db);
+
+            // 1. Clear existing data if mode is 'replace'
+            if (mode === 'replace') {
+                const collections = ['years', 'participants', 'judges', 'scores', 'admins', 'settings', 'scoringItems'];
+                for (const collName of collections) {
+                    const snap = await getDocs(collection(db, collName));
+                    snap.docs.forEach(doc => batch.delete(doc.ref));
+                }
+            }
+
+            // 2. Import Years & Categories
+            if (data.years) {
+                data.years.forEach(year => {
+                    batch.set(doc(db, 'years', year.id), year);
+                });
+            }
+
+            // 3. Import Participants
+            if (data.participants) {
+                // Handle both flat array or object grouped by cat
+                const pList = Array.isArray(data.participants)
+                    ? data.participants
+                    : Object.values(data.participants).flat();
+
+                pList.forEach(p => {
+                    if (!p.id || !p.categoryId) return;
+                    const parts = p.categoryId.split('-');
+                    const docId = `${p.categoryId}_${p.id}`;
+
+                    // Ensure granular fields even if missing in JSON
+                    const pData = {
+                        ...p,
+                        year: p.year || parts[0],
+                        genre: p.genre || (parts.slice(1).join(' ').split(' ')[0] || 'General'),
+                        category: p.category || (parts.slice(1).join(' ').split(' ').slice(1).join(' ') || parts.slice(1).join(' '))
+                    };
+                    batch.set(doc(db, 'participants', docId), pData);
+                });
+            }
+
+            // 4. Import Judges
+            if (data.judgesByYear) {
+                Object.entries(data.judgesByYear).forEach(([yearId, judges]) => {
+                    judges.forEach(j => {
+                        batch.set(doc(db, 'judges', `${yearId}_${j.email.replace(/\./g, '_')}`), { ...j, yearId });
+                    });
+                });
+            }
+
+            // 5. Import Scoring Items
+            if (data.scoringItems) {
+                data.scoringItems.forEach(item => {
+                    batch.set(doc(db, 'scoringItems', item.id), item);
+                });
+            }
+
+            // 6. Import Settings
+            if (data.settings) {
+                batch.set(doc(db, 'settings', 'competition'), data.settings);
+            }
+
+            await batch.commit();
+            return { success: true };
+        } catch (error) {
+            console.error("Import failed:", error);
+            throw error;
+        }
+    },
+
+    clearAllData: async () => {
+        if (!window.confirm("정말로 모든 데이터를 삭제하시겠습니까? 이 작업은 되돌릴 수 없습니다.")) return;
+        const batch = writeBatch(db);
+        const collections = ['years', 'participants', 'judges', 'scores', 'admins', 'settings', 'scoringItems'];
+        for (const collName of collections) {
+            const snap = await getDocs(collection(db, collName));
+            snap.docs.forEach(doc => batch.delete(doc.ref));
+        }
+        await batch.commit();
+        alert("모든 데이터가 삭제되었습니다.");
     },
 
     batchUpdateParticipants: async (categoryId, updates) => {
@@ -383,7 +553,9 @@ const useStore = create((set, get) => ({
     },
 
     initSync: () => {
-        const { refreshScores } = get();
+        const { refreshScores, isSyncInitialized } = get();
+        if (isSyncInitialized) return;
+        set({ isSyncInitialized: true });
 
         // Sync General Settings
         onSnapshot(doc(db, 'settings', 'general'), (docSnap) => {
@@ -395,9 +567,9 @@ const useStore = create((set, get) => ({
         });
 
         // Sync Scoring Items
-        onSnapshot(doc(db, 'settings', 'scoring'), (doc) => {
-            if (doc.exists()) {
-                set({ scoringItems: doc.data().items || [] });
+        onSnapshot(doc(db, 'settings', 'scoring'), (docSnap) => {
+            if (docSnap.exists()) {
+                set({ scoringItems: docSnap.data().items || [] });
             } else {
                 // Initialize default scoring items if not exists
                 const defaults = [
@@ -449,16 +621,53 @@ const useStore = create((set, get) => ({
         });
 
         // Sync Participants
-        onSnapshot(collection(db, 'participants'), (snapshot) => {
-            const participantsByCat = {};
-            snapshot.docs.forEach(doc => {
-                const p = doc.data();
-                if (!participantsByCat[p.categoryId]) participantsByCat[p.categoryId] = [];
-                participantsByCat[p.categoryId].push(p);
-            });
-            set({ participants: participantsByCat });
-            checkAllSynced('participants');
-        });
+        const unsubParticipants = onSnapshot(collection(db, 'participants'),
+            (snapshot) => {
+                const participantsByCat = {};
+                let errorCount = 0;
+
+                snapshot.docs.forEach(doc => {
+                    const p = doc.data();
+                    const pId = doc.id;
+                    let catId = p.categoryId;
+
+                    // Support legacy or corrupt data where categoryId field might be missing
+                    if (!catId && pId.includes('_')) {
+                        catId = pId.split('_')[0];
+                    }
+
+                    if (catId) {
+                        if (!participantsByCat[catId]) participantsByCat[catId] = [];
+
+                        // Ensure granular fields are present even for legacy data
+                        const parts = catId.split('-');
+                        const participantData = {
+                            ...p,
+                            id: p.id || pId.split('_').pop(),
+                            categoryId: catId,
+                            year: p.year || parts[0],
+                            genre: p.genre || (parts.slice(1).join(' ').split(' ')[0] || 'General'),
+                            category: p.category || (parts.slice(1).join(' ').split(' ').slice(1).join(' ') || parts.slice(1).join(' '))
+                        };
+
+                        participantsByCat[catId].push(participantData);
+                    } else {
+                        errorCount++;
+                    }
+                });
+
+                console.log(`[Sync] Participants updated. Count: ${snapshot.size}, Errors: ${errorCount}`);
+                set({ participants: participantsByCat });
+                checkAllSynced('participants');
+            },
+            (error) => {
+                console.error('[Sync] Participants sync error:', error);
+                if (error.code === 'permission-denied') {
+                    console.warn('[Sync] Permission denied for participants. Check Firestore Rules.');
+                }
+                checkAllSynced('participants'); // Don't block app even if error
+            }
+        );
 
         // Sync Admins
         onSnapshot(collection(db, 'admins'), (snapshot) => {

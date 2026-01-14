@@ -16,16 +16,16 @@ const Scorer = () => {
         console.log(`[Scorer] Participants for ${selectedCategoryId}:`, participants[selectedCategoryId]);
     }
 
-    const categoryParticipants = participants[selectedCategoryId] || [];
+    const categoryParticipants = useMemo(() => participants[selectedCategoryId] || [], [participants, selectedCategoryId]);
     // localScores structure: { [participantId]: { [itemId]: value } }
     const [localScores, setLocalScores] = useState({});
     const [isSaving, setIsSaving] = useState(false);
 
     // Initial check logic
-    const currentYear = years.find(y => y.categories?.some(c => c.id === selectedCategoryId));
+    const currentYear = useMemo(() => years.find(y => y.categories?.some(c => c.id === selectedCategoryId)), [years, selectedCategoryId]);
     const currentYearId = currentYear?.id;
-    const categoryName = currentYear?.categories?.find(c => c.id === selectedCategoryId)?.name || '';
-    const isSolo = categoryName.toUpperCase().includes('SOLO');
+    const categoryName = useMemo(() => currentYear?.categories?.find(c => c.id === selectedCategoryId)?.name || '', [currentYear, selectedCategoryId]);
+    const isSolo = useMemo(() => categoryName.toUpperCase().includes('SOLO'), [categoryName]);
 
     // Auth & Lock logic
     const isYearLocked = currentYear?.locked;
@@ -171,14 +171,14 @@ const Scorer = () => {
     // Sort scoring items
     const sortedItems = [...scoringItems].sort((a, b) => a.order - b.order);
 
-    // Sort participants by correct total score (descending)
+    // Sort participants by number (ascending)
     const sortedParticipants = useMemo(() => {
         return [...categoryParticipants].sort((a, b) => {
-            const totalA = getParticipantTotal(a.id);
-            const totalB = getParticipantTotal(b.id);
-            return totalB - totalA;
+            const numA = parseInt(a.number || 0, 10);
+            const numB = parseInt(b.number || 0, 10);
+            return numA - numB;
         });
-    }, [categoryParticipants, getParticipantTotal]);
+    }, [categoryParticipants]);
 
     // Top Ranked for Widget
     const topRanked = sortedParticipants.slice(0, 3).filter(p => getParticipantTotal(p.id) > 0);
@@ -219,9 +219,20 @@ const Scorer = () => {
     if (categoryParticipants.length === 0) {
         return (
             <div className="max-w-screen-xl mx-auto pb-20 px-4">
-                <div className="min-h-[60vh] flex flex-col items-center justify-center text-center p-10 border-2 border-dashed border-white/5 rounded-3xl">
-                    <Users className="text-slate-700 w-12 h-12 mb-4" />
-                    <p className="text-slate-500 font-bold uppercase tracking-widest text-sm italic">등록된 참가자가 없습니다.</p>
+                <div className="min-h-[60vh] flex flex-col items-center justify-center text-center p-10 border-2 border-dashed border-white/10 rounded-3xl bg-white/[0.02]">
+                    <div className="w-16 h-16 bg-slate-800 rounded-full flex items-center justify-center mb-6 ring-4 ring-white/5">
+                        <Users className="text-slate-500 w-8 h-8" />
+                    </div>
+                    <h2 className="text-xl font-bold text-white mb-2">등록된 참가자가 없습니다</h2>
+                    <p className="text-slate-500 text-sm max-w-sm mb-8 leading-relaxed">
+                        이 종목에 등록된 참가자가 없거나, 데이터 연결이 끊어졌을 수 있습니다.
+                    </p>
+                    <div className="p-4 bg-indigo-500/10 border border-indigo-500/20 rounded-xl text-left max-w-md">
+                        <p className="text-[10px] font-black text-indigo-400 uppercase tracking-widest mb-1">Troubleshooting Tip</p>
+                        <p className="text-xs text-indigo-300/70">
+                            관리자 화면에서 참가자를 등록했는지 확인해 주세요. 만약 등록했는데도 보이지 않는다면 상단 툴바의 <span className="font-bold">시스템 진단(Diagnostic)</span> 패널을 확인하여 끊어진 데이터를 복구할 수 있습니다.
+                        </p>
+                    </div>
                 </div>
             </div>
         );

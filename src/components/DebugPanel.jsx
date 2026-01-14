@@ -30,13 +30,19 @@ const DebugPanel = () => {
         setIsFixing(true);
         try {
             let restoredCount = 0;
+            // Batch repair grouping by year to minimize writeDoc calls if possible,
+            // but since we are using individual updateDoc, we'll keep it simple for now.
+
             for (const ghostId of ghostCategories) {
-                // Assume format: YYYY-category-name-slug
+                // Assume format: YYYY-category-name-slug or custom-id
                 const parts = ghostId.split('-');
                 const yearId = parts[0]; // e.g., "2024", "2025"
-                const nameSlug = parts.slice(1).join(' '); // "bachata shine solo"
 
-                // Convert slug to Title Case for display name
+                // Extract name from ID if possible
+                let nameSlug = parts.slice(1).join(' ');
+                if (!nameSlug) nameSlug = ghostId;
+
+                // Convert slug to Title Case
                 const displayName = nameSlug
                     .split(' ')
                     .map(w => w.charAt(0).toUpperCase() + w.slice(1))
@@ -44,25 +50,31 @@ const DebugPanel = () => {
 
                 const year = state.years.find(y => y.id === yearId);
                 if (year) {
+                    const existingCats = year.categories || [];
+                    if (existingCats.some(c => c.id === ghostId)) continue; // Already exists
+
                     const newCat = {
                         id: ghostId,
                         name: displayName,
-                        order: (year.categories || []).length // Append to end
+                        order: existingCats.length
                     };
-                    const updatedCategories = [...(year.categories || []), newCat];
+                    const updatedCategories = [...existingCats, newCat];
                     await updateDoc(doc(db, 'years', yearId), { categories: updatedCategories });
                     restoredCount++;
                     console.log(`[Fix] Restored category: ${displayName} (${ghostId}) to Year ${yearId}`);
                 } else {
                     console.warn(`[Fix] Could not find year ${yearId} for ghost category ${ghostId}`);
+                    // Option: Create year? Better to let admin handle it or fix ID.
                 }
             }
             if (restoredCount > 0) {
-                alert(`Restored ${restoredCount} categories!`);
+                alert(`${restoredCount}개의 끊어진 종목이 복구되었습니다!`);
+            } else {
+                alert("복구할 수 있는 종목이 없습니다. 연도 ID가 일치하는지 확인해 주세요.");
             }
         } catch (error) {
             console.error("Error fixing ghost categories:", error);
-            alert("Error fixing categories. Check console.");
+            alert("복구 중 오류 발생: " + error.message);
         } finally {
             setIsFixing(false);
         }

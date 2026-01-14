@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Plus, Trash2, ArrowUp, ArrowDown, Settings, List, Shield, Trophy, Layout, Users, UserPlus, Hash, User as UserIcon, SortAsc, Lock, Unlock, PenTool } from 'lucide-react';
+import { Plus, Trash2, ArrowUp, ArrowDown, Settings, List, Shield, Trophy, Layout, Users, UserPlus, Hash, User as UserIcon, SortAsc, Lock, Unlock, PenTool, FileUp, FileDown, Database, AlertTriangle, Check, LogOut } from 'lucide-react';
 import useStore from '../store/useStore';
 import { clsx } from 'clsx';
 import { twMerge } from 'tailwind-merge';
@@ -17,6 +17,7 @@ const AdminPanel = () => {
         addCategory, updateCategory, deleteCategory, moveCategory, sortCategoriesByName, toggleYearLock,
         admins, addAdmin, removeAdmin, competitionName, setCompetitionName,
         seedRandomScores, clearYearScores,
+        exportData, importData, clearAllData,
         currentUser
     } = useStore();
 
@@ -45,6 +46,10 @@ const AdminPanel = () => {
     // Participant Batch & Sort states
     const [sortConfig, setSortConfig] = useState({ field: 'no', direction: 'asc' });
     const [recoveryTargetCatId, setRecoveryTargetCatId] = useState('');
+
+    // Import states
+    const [importMode, setImportMode] = useState('merge'); // 'merge' or 'replace'
+    const [isImporting, setIsImporting] = useState(false);
 
     // Find info for current category
     const findCatInfo = () => {
@@ -76,10 +81,30 @@ const AdminPanel = () => {
     const handleAddParticipant = (e) => {
         e.preventDefault();
         if (manageCatId && newPNumber.trim() && newPName.trim()) {
+            const currentList = participants[manageCatId] || [];
+            if (currentList.some(p => p.number === newPNumber.trim())) {
+                alert('이미 등록된 참가번호입니다. (Duplicate Number)');
+                return;
+            }
             addParticipant(manageCatId, newPNumber.trim(), newPName.trim());
             setNewPNumber('');
             setNewPName('');
         }
+    };
+
+    const validateAndUpdateParticipant = (categoryId, pId, newNumber, newName) => {
+        if (!newNumber.trim() || !newName.trim()) return;
+
+        const currentList = participants[categoryId] || [];
+        const isDuplicate = currentList.some(p => p.number === newNumber.trim() && p.id !== pId);
+
+        if (isDuplicate) {
+            alert('이미 등록된 참가번호입니다. (Duplicate Number)');
+            return;
+        }
+
+        updateParticipant(categoryId, pId, { number: newNumber.trim(), name: newName.trim() });
+        setEditingPId(null);
     };
 
     const handleUpdateParticipant = (pId) => {
@@ -109,7 +134,7 @@ const AdminPanel = () => {
                 a.number.localeCompare(b.number, undefined, { numeric: true })
             );
             sortedCatPs.forEach(p => {
-                all.push({ ...p, categoryName: cat.name });
+                all.push({ ...p, categoryName: cat.name, categoryId: cat.id });
             });
         });
 
@@ -164,7 +189,8 @@ const AdminPanel = () => {
                         { id: 'scoring', label: '채점 항목', icon: List },
                         { id: 'participants', label: '참가자 관리', icon: Users },
                         { id: 'judges', label: '심사위원 관리', icon: Shield },
-                        { id: 'settings', label: '설정', icon: Settings },
+                        { id: 'settings', label: '대회 설정', icon: Settings },
+                        { id: 'data', label: '데이터 관리', icon: Database },
                         ...(currentUser?.role === 'ROOT_ADMIN' ? [{ id: 'admins', label: '관리자(Root)', icon: Lock }] : [])
                     ].map(tab => (
                         <button
@@ -249,14 +275,14 @@ const AdminPanel = () => {
                                 <button type="submit" className="bg-emerald-600 hover:bg-emerald-500 text-white py-3 rounded-xl font-bold flex items-center justify-center gap-2 transition-all hover:scale-[1.02]"><UserPlus size={20} /> 참가자 등록</button>
                             </form>
                             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-                                {(participants[manageCatId] || []).map(p => (
+                                {(participants[manageCatId] || []).sort((a, b) => a.number.localeCompare(b.number, undefined, { numeric: true })).map(p => (
                                     <div key={p.id} className="p-4 bg-white/5 border border-white/10 rounded-xl flex items-center justify-between group">
                                         {editingPId === p.id ? (
                                             <div className="flex flex-col gap-2 w-full">
                                                 <input className="bg-black/60 border border-white/20 rounded px-2 py-1 text-white text-sm" value={editPNumber} onChange={(e) => setEditPNumber(e.target.value)} placeholder="참가번호" />
                                                 <input className="bg-black/60 border border-white/20 rounded px-2 py-1 text-white text-sm" value={editPName} onChange={(e) => setEditPName(e.target.value)} placeholder="이름" />
                                                 <div className="flex gap-2">
-                                                    <button onClick={() => { updateParticipant(manageCatId, p.id, { number: editPNumber, name: editPName }); setEditingPId(null); }} className="text-[10px] bg-emerald-600 px-3 py-1 rounded font-bold">저장</button>
+                                                    <button onClick={() => validateAndUpdateParticipant(manageCatId, p.id, editPNumber, editPName)} className="text-[10px] bg-emerald-600 px-3 py-1 rounded font-bold">저장</button>
                                                     <button onClick={() => setEditingPId(null)} className="text-[10px] bg-slate-600 px-3 py-1 rounded font-bold">취소</button>
                                                 </div>
                                             </div>
@@ -305,15 +331,58 @@ const AdminPanel = () => {
                                         {yearAllParticipants.map((p, index) => (
                                             <tr key={`${p.categoryId}_${p.id}`} className="hover:bg-white/[0.02] transition-colors group">
                                                 <td className="px-6 py-5 text-center font-black text-slate-600">{index + 1}</td>
-                                                <td className="px-6 py-5 font-mono font-bold text-lg text-white">{p.number}</td>
-                                                <td className="px-6 py-5 font-bold text-lg text-white">{p.name}</td>
-                                                <td className="px-6 py-5"><span className="text-xs bg-white/5 px-3 py-1.5 rounded-lg text-slate-300 font-bold uppercase tracking-tight">{p.categoryName}</span></td>
-                                                <td className="px-6 py-5 text-center">
-                                                    <div className="flex items-center justify-center gap-2 opacity-0 group-hover:opacity-100 transition-all">
-                                                        <button onClick={() => { setEditingPId(p.id); setEditPNumber(p.number); setEditPName(p.name); }} className="p-2 hover:bg-white/10 rounded-lg text-slate-400"><Settings size={16} /></button>
-                                                        <button onClick={() => removeParticipant(p.categoryId, p.id)} className="p-2 hover:bg-rose-500/20 rounded-lg text-rose-400"><Trash2 size={16} /></button>
-                                                    </div>
-                                                </td>
+                                                {editingPId === p.id ? (
+                                                    <>
+                                                        <td className="px-6 py-5">
+                                                            <input
+                                                                className="w-full bg-black/60 border border-white/20 rounded px-2 py-1 text-white text-lg font-mono font-bold outline-none focus:border-indigo-500"
+                                                                value={editPNumber}
+                                                                onChange={(e) => setEditPNumber(e.target.value)}
+                                                                placeholder="Back No."
+                                                                autoFocus
+                                                            />
+                                                        </td>
+                                                        <td className="px-6 py-5">
+                                                            <input
+                                                                className="w-full bg-black/60 border border-white/20 rounded px-2 py-1 text-white text-lg font-bold outline-none focus:border-indigo-500"
+                                                                value={editPName}
+                                                                onChange={(e) => setEditPName(e.target.value)}
+                                                                placeholder="Name"
+                                                            />
+                                                        </td>
+                                                        <td className="px-6 py-5"><span className="text-xs bg-white/5 px-3 py-1.5 rounded-lg text-slate-300 font-bold uppercase tracking-tight">{p.categoryName}</span></td>
+                                                        <td className="px-6 py-5 text-center">
+                                                            <div className="flex items-center justify-center gap-2">
+                                                                <button
+                                                                    onClick={() => validateAndUpdateParticipant(p.categoryId, p.id, editPNumber, editPName)}
+                                                                    className="p-2 bg-emerald-600 hover:bg-emerald-500 rounded-lg text-white"
+                                                                    title="저장"
+                                                                >
+                                                                    <Check size={16} />
+                                                                </button>
+                                                                <button
+                                                                    onClick={() => setEditingPId(null)}
+                                                                    className="p-2 bg-slate-600 hover:bg-slate-500 rounded-lg text-white"
+                                                                    title="취소"
+                                                                >
+                                                                    <LogOut size={16} className="rotate-180" />
+                                                                </button>
+                                                            </div>
+                                                        </td>
+                                                    </>
+                                                ) : (
+                                                    <>
+                                                        <td className="px-6 py-5 font-mono font-bold text-lg text-white">{p.number}</td>
+                                                        <td className="px-6 py-5 font-bold text-lg text-white">{p.name}</td>
+                                                        <td className="px-6 py-5"><span className="text-xs bg-white/5 px-3 py-1.5 rounded-lg text-slate-300 font-bold uppercase tracking-tight">{p.categoryName}</span></td>
+                                                        <td className="px-6 py-5 text-center">
+                                                            <div className="flex items-center justify-center gap-2 opacity-0 group-hover:opacity-100 transition-all">
+                                                                <button onClick={() => { setEditingPId(p.id); setEditPNumber(p.number); setEditPName(p.name); }} className="p-2 hover:bg-white/10 rounded-lg text-slate-400"><Settings size={16} /></button>
+                                                                <button onClick={() => removeParticipant(p.categoryId, p.id)} className="p-2 hover:bg-rose-500/20 rounded-lg text-rose-400"><Trash2 size={16} /></button>
+                                                            </div>
+                                                        </td>
+                                                    </>
+                                                )}
                                             </tr>
                                         ))}
                                     </tbody>
@@ -435,38 +504,154 @@ const AdminPanel = () => {
                         </div>
                     </div>
 
-                    <div className="glass-card p-8 animate-in fade-in slide-in-from-bottom-2 duration-500 bg-amber-500/5 border-amber-500/20">
-                        <div className="flex items-center gap-2 mb-6">
-                            <PenTool className="text-amber-400" />
-                            <h2 className="text-xl font-bold text-white">테스트 데이터 도구 (Developer)</h2>
+                    {import.meta.env.DEV && (
+                        <div className="glass-card p-8 animate-in fade-in slide-in-from-bottom-2 duration-500 bg-amber-500/5 border-amber-500/20">
+                            <div className="flex items-center gap-2 mb-6">
+                                <PenTool className="text-amber-400" />
+                                <h2 className="text-xl font-bold text-white">테스트 데이터 도구 (Developer)</h2>
+                            </div>
+                            <div className="space-y-4">
+                                <p className="text-xs text-slate-400">2025년 종목들에 대해 가상의 심사위원 3명의 점수를 자동으로 생성하거나 초기화합니다.</p>
+                                <div className="flex gap-4">
+                                    <button
+                                        onClick={async () => {
+                                            if (confirm('2025년 모든 종목에 랜덤 점수를 생성하시겠습니까? (수 초 소요될 수 있습니다)')) {
+                                                await seedRandomScores('2025');
+                                                alert('2025년 데이터 생성이 완료되었습니다.');
+                                            }
+                                        }}
+                                        className="bg-amber-600 hover:bg-amber-500 text-white px-6 py-3 rounded-xl font-bold transition-all"
+                                    >
+                                        2025년 랜덤 데이터 채우기
+                                    </button>
+                                    <button
+                                        onClick={async () => {
+                                            if (confirm('2025년의 모든 점수 데이터를 삭제하시겠습니까?')) {
+                                                await clearYearScores('2025');
+                                                alert('2025년 데이터가 초기화되었습니다.');
+                                            }
+                                        }}
+                                        className="bg-white/5 border border-white/10 hover:bg-rose-500/20 hover:border-rose-500/50 text-slate-400 hover:text-rose-400 px-6 py-3 rounded-xl font-bold transition-all"
+                                    >
+                                        2025년 점수 초기화
+                                    </button>
+                                </div>
+                            </div>
                         </div>
-                        <div className="space-y-4">
-                            <p className="text-xs text-slate-400">2025년 종목들에 대해 가상의 심사위원 3명의 점수를 자동으로 생성하거나 초기화합니다.</p>
-                            <div className="flex gap-4">
+                    )}
+                </div>
+            )}
+
+            {activeTab === 'data' && (
+                <div className="space-y-6">
+                    <div className="glass-card p-8 animate-in fade-in slide-in-from-bottom-2 duration-500">
+                        <div className="flex items-center gap-2 mb-6">
+                            <Database className="text-indigo-400" />
+                            <h2 className="text-xl font-bold text-white">데이터 백업 및 관리 (JSON)</h2>
+                        </div>
+
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                            {/* Export Section */}
+                            <div className="p-6 bg-white/5 border border-white/10 rounded-2xl">
+                                <FileDown className="text-indigo-400 mb-4" size={32} />
+                                <h3 className="text-lg font-bold text-white mb-2">DB 데이터 내보내기</h3>
+                                <p className="text-xs text-slate-400 mb-6 leading-relaxed">
+                                    현재 연도, 종목, 참가자, 심사위원 정보를 포함한 전체 DB 정보를 JSON 파일로 내려받습니다.
+                                </p>
                                 <button
-                                    onClick={async () => {
-                                        if (confirm('2025년 모든 종목에 랜덤 점수를 생성하시겠습니까? (수 초 소요될 수 있습니다)')) {
-                                            await seedRandomScores('2025');
-                                            alert('2025년 데이터 생성이 완료되었습니다.');
-                                        }
-                                    }}
-                                    className="bg-amber-600 hover:bg-amber-500 text-white px-6 py-3 rounded-xl font-bold transition-all"
+                                    onClick={exportData}
+                                    className="w-full py-4 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl font-bold flex items-center justify-center gap-2 transition-all"
                                 >
-                                    2025년 랜덤 데이터 채우기
+                                    <FileDown size={20} /> JSON 파일 다운로드
                                 </button>
-                                <button
-                                    onClick={async () => {
-                                        if (confirm('2025년의 모든 점수 데이터를 삭제하시겠습니까?')) {
-                                            await clearYearScores('2025');
-                                            alert('2025년 데이터가 초기화되었습니다.');
+                            </div>
+
+                            {/* Import Section */}
+                            <div className="p-6 bg-white/5 border border-white/10 rounded-2xl">
+                                <FileUp className="text-emerald-400 mb-4" size={32} />
+                                <h3 className="text-lg font-bold text-white mb-2">DB 데이터 가져오기</h3>
+                                <div className="flex gap-4 mb-4">
+                                    <label className="flex-1 flex items-center gap-2 cursor-pointer">
+                                        <input
+                                            type="radio"
+                                            name="importMode"
+                                            checked={importMode === 'merge'}
+                                            onChange={() => setImportMode('merge')}
+                                            className="accent-emerald-500"
+                                        />
+                                        <span className="text-xs text-slate-300">병합 (Merge)</span>
+                                    </label>
+                                    <label className="flex-1 flex items-center gap-2 cursor-pointer">
+                                        <input
+                                            type="radio"
+                                            name="importMode"
+                                            checked={importMode === 'replace'}
+                                            onChange={() => setImportMode('replace')}
+                                            className="accent-rose-500"
+                                        />
+                                        <span className="text-xs text-slate-300 text-rose-400">전체 교체 (Replace)</span>
+                                    </label>
+                                </div>
+                                <input
+                                    type="file"
+                                    accept=".json"
+                                    id="import-file"
+                                    className="hidden"
+                                    onChange={async (e) => {
+                                        const file = e.target.files?.[0];
+                                        if (!file) return;
+
+                                        if (importMode === 'replace' && !window.confirm("주의! 기존 데이터가 모두 삭제되고 파일 내용으로 대체됩니다. 진행하시겠습니까?")) {
+                                            e.target.value = '';
+                                            return;
                                         }
+
+                                        const reader = new FileReader();
+                                        reader.onload = async (event) => {
+                                            try {
+                                                setIsImporting(true);
+                                                const json = JSON.parse(event.target.result);
+                                                await importData(json, importMode);
+                                                alert('데이터를 성공적으로 가져왔습니다.');
+                                            } catch (err) {
+                                                alert('파일 읽기 또는 데이터 처리 중 오류가 발생했습니다: ' + err.message);
+                                            } finally {
+                                                setIsImporting(false);
+                                                e.target.value = '';
+                                            }
+                                        };
+                                        reader.readAsText(file);
                                     }}
-                                    className="bg-white/5 border border-white/10 hover:bg-rose-500/20 hover:border-rose-500/50 text-slate-400 hover:text-rose-400 px-6 py-3 rounded-xl font-bold transition-all"
+                                />
+                                <button
+                                    onClick={() => document.getElementById('import-file').click()}
+                                    disabled={isImporting}
+                                    className="w-full py-4 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white rounded-xl font-bold flex items-center justify-center gap-2 transition-all"
                                 >
-                                    2025년 점수 초기화
+                                    {isImporting ? <span className="animate-spin text-xl">⏳</span> : <FileUp size={20} />}
+                                    JSON 파일 업로드
                                 </button>
                             </div>
                         </div>
+
+                        {/* Danger Zone - Dev Only */}
+                        {import.meta.env.DEV && (
+                            <div className="mt-12 p-6 bg-rose-500/5 border border-rose-500/20 rounded-2xl">
+                                <div className="flex items-center gap-3 mb-4">
+                                    <AlertTriangle className="text-rose-500" />
+                                    <h3 className="text-lg font-bold text-white">Danger Zone (Dev Only)</h3>
+                                </div>
+                                <div className="flex flex-col md:flex-row items-center justify-between gap-4">
+                                    <p className="text-xs text-slate-400">모든 연도, 종목, 참가자, 점수 등 데이터베이스의 **모든 정보를 영구적으로 삭제**합니다.</p>
+                                    <button
+                                        onClick={clearAllData}
+                                        className="px-6 py-3 bg-white/5 border border-rose-500/30 text-rose-400 hover:bg-rose-500 hover:text-white rounded-xl text-xs font-bold transition-all whitespace-nowrap"
+                                    >
+                                        데이터베이스 완전 초기화
+                                    </button>
+                                </div>
+                            </div>
+                        )}
                     </div>
                 </div>
             )}
