@@ -315,125 +315,220 @@ const Scorer = () => {
                         </p>
                     </div>
                 ) : (
-                    <div className="overflow-x-auto custom-scrollbar">
-                        <table className="w-full text-left border-collapse min-w-max">
-                            <thead>
-                                <tr className="bg-gradient-to-r from-slate-900 to-slate-800 text-xs font-black text-slate-400 uppercase tracking-widest border-b border-white/10">
-                                    <th className="sticky left-0 z-20 bg-slate-900/95 backdrop-blur-sm px-4 py-4 w-16 text-center shadow-[1px_0_0_rgba(255,255,255,0.1)]">No.</th>
-                                    <th className="sticky left-16 z-20 bg-slate-900/95 backdrop-blur-sm px-4 py-4 min-w-[160px] shadow-[4px_0_10px_rgba(0,0,0,0.5)]">Participant</th>
-                                    {sortedItems.map(item => {
-                                        const match = item.label.match(/^([^(]+)(\(([^)]+)\))?$/);
-                                        const mainLabel = match ? match[1].trim() : item.label;
-                                        const subLabel = match && match[3] ? match[3].trim() : '';
-                                        return (
-                                            <th key={item.id} className="px-2 py-4 text-center min-w-[70px]">
-                                                <div className="flex flex-col items-center justify-center leading-tight">
-                                                    <span className="text-slate-300 mobile:text-[10px]">{mainLabel}</span>
-                                                    {subLabel && <span className="text-[9px] text-slate-600 mt-0.5">{subLabel}</span>}
-                                                </div>
-                                            </th>
-                                        );
-                                    })}
-                                    <th className="px-4 py-4 w-24 text-center text-indigo-400 sticky right-0 z-20 bg-slate-900/95 backdrop-blur-sm shadow-[-4px_0_10px_rgba(0,0,0,0.5)]">Total</th>
-                                </tr>
-                            </thead>
-                            <tbody className="divide-y divide-white/5">
-                                {sortedParticipants.length === 0 ? (
-                                    <tr>
-                                        <td colSpan={3 + sortedItems.length} className="px-6 py-20 text-center">
-                                            <AlertCircle className="mx-auto text-slate-600 mb-4 w-12 h-12" />
-                                            <p className="text-slate-500 font-bold">이 종목에 등록된 참가자가 없습니다.</p>
-                                        </td>
+                    <>
+                        {/* Desktop Table View */}
+                        <div className="hidden md:block overflow-x-auto custom-scrollbar">
+                            <table className="w-full text-left border-collapse min-w-max">
+                                <thead>
+                                    <tr className="bg-gradient-to-r from-slate-900 to-slate-800 text-xs font-black text-slate-400 uppercase tracking-widest border-b border-white/10">
+                                        <th className="sticky left-0 z-20 bg-slate-900/95 backdrop-blur-sm px-4 py-4 w-16 text-center shadow-[1px_0_0_rgba(255,255,255,0.1)]">No.</th>
+                                        <th className="sticky left-16 z-20 bg-slate-900/95 backdrop-blur-sm px-4 py-4 min-w-[160px] shadow-[4px_0_10px_rgba(0,0,0,0.5)]">Participant</th>
+                                        {sortedItems.map(item => {
+                                            const match = item.label.match(/^([^(]+)(\(([^)]+)\))?$/);
+                                            const mainLabel = match ? match[1].trim() : item.label;
+                                            const subLabel = match && match[3] ? match[3].trim() : '';
+                                            return (
+                                                <th key={item.id} className="px-2 py-4 text-center min-w-[70px]">
+                                                    <div className="flex flex-col items-center justify-center leading-tight">
+                                                        <span className="text-indigo-200 mobile:text-xs font-bold text-sm">{mainLabel}</span>
+                                                        {subLabel && <span className="text-[10px] text-indigo-400/70 mt-0.5">{subLabel}</span>}
+                                                    </div>
+                                                </th>
+                                            );
+                                        })}
+                                        <th className="px-4 py-4 w-24 text-center text-indigo-400 sticky right-0 z-20 bg-slate-900/95 backdrop-blur-sm shadow-[-4px_0_10px_rgba(0,0,0,0.5)]">Total</th>
                                     </tr>
-                                ) : (
-                                    sortedParticipants.map((p) => {
-                                        const displayTotal = getParticipantTotal(p.id).toFixed(1);
+                                </thead>
+                                <tbody className="divide-y divide-white/5">
+                                    {sortedParticipants.length === 0 ? (
+                                        <tr>
+                                            <td colSpan={3 + sortedItems.length} className="px-6 py-20 text-center">
+                                                <AlertCircle className="mx-auto text-slate-600 mb-4 w-12 h-12" />
+                                                <p className="text-slate-500 font-bold">이 종목에 등록된 참가자가 없습니다.</p>
+                                            </td>
+                                        </tr>
+                                    ) : (
+                                        sortedParticipants.map((p) => {
+                                            const displayTotal = getParticipantTotal(p.id).toFixed(1);
 
-                                        return (
-                                            <tr key={p.id} className="hover:bg-white/[0.02] transition-colors group">
-                                                <td className="sticky left-0 z-10 bg-[#0f172a]/95 backdrop-blur-sm px-4 py-3 text-center font-black text-slate-600 text-lg shadow-[1px_0_0_rgba(255,255,255,0.05)] group-hover:bg-[#151e32]/95 transition-colors">
-                                                    {p.number}
-                                                </td>
-                                                <td className="sticky left-16 z-10 bg-[#0f172a]/95 backdrop-blur-sm px-4 py-3 shadow-[4px_0_10px_rgba(0,0,0,0.3)] group-hover:bg-[#151e32]/95 transition-colors text-xs">
-                                                    <div className="font-bold text-white text-base truncate max-w-[180px]">{p.name}</div>
-                                                </td>
-                                                {sortedItems.map(item => {
-                                                    // Special handling for Teamwork
-                                                    const isTeamwork = item.label === '팀워크';
-                                                    const isDisabled = (isSolo && isTeamwork);
+                                            return (
+                                                <tr key={p.id} className="hover:bg-white/[0.02] transition-colors group">
+                                                    <td className="sticky left-0 z-10 bg-[#0f172a]/95 backdrop-blur-sm px-4 py-3 text-center font-black text-slate-600 text-lg shadow-[1px_0_0_rgba(255,255,255,0.05)] group-hover:bg-[#151e32]/95 transition-colors">
+                                                        {p.number}
+                                                    </td>
+                                                    <td className="sticky left-16 z-10 bg-[#0f172a]/95 backdrop-blur-sm px-4 py-3 shadow-[4px_0_10px_rgba(0,0,0,0.3)] group-hover:bg-[#151e32]/95 transition-colors text-xs">
+                                                        <div className="font-bold text-white text-base truncate max-w-[180px]">{p.name}</div>
+                                                    </td>
+                                                    {sortedItems.map(item => {
+                                                        // Special handling for Teamwork
+                                                        const isTeamwork = item.label === '팀워크';
+                                                        const isDisabled = (isSolo && isTeamwork);
 
-                                                    if (isDisabled) {
-                                                        return (
-                                                            <td key={item.id} className="px-2 py-2 text-center">
-                                                                <div className="text-[10px] font-bold text-slate-700 italic select-none">-</div>
-                                                            </td>
-                                                        );
-                                                    }
+                                                        if (isDisabled) {
+                                                            return (
+                                                                <td key={item.id} className="px-2 py-2 text-center">
+                                                                    <div className="text-[10px] font-bold text-slate-700 italic select-none">-</div>
+                                                                </td>
+                                                            );
+                                                        }
 
-                                                    // Spectator View (Locked) OR Admin Monitoring View
-                                                    if ((isSpectator && isLocked) || (isAdmin && !isJudgeForThisYear)) {
-                                                        const avgScore = getAverageItemScore(p.id, item.id);
+                                                        // Spectator View (Locked) OR Admin Monitoring View
+                                                        if ((isSpectator && isLocked) || (isAdmin && !isJudgeForThisYear)) {
+                                                            const avgScore = getAverageItemScore(p.id, item.id);
+                                                            return (
+                                                                <td key={item.id} className="px-1 py-1">
+                                                                    <div className="flex flex-col items-center justify-center p-1 bg-white/[0.03] rounded-lg h-12 border border-white/5">
+                                                                        <div className={cn(
+                                                                            "text-sm font-black tabular-nums",
+                                                                            avgScore !== '-' ? "text-indigo-400" : "text-slate-600"
+                                                                        )}>
+                                                                            {avgScore}
+                                                                        </div>
+                                                                    </div>
+                                                                </td>
+                                                            );
+                                                        }
+
+                                                        // Standard Input View (Judge / Admin-Judge)
+                                                        const isActive = localScores[p.id]?.[item.id] !== undefined && localScores[p.id]?.[item.id] !== '';
+
                                                         return (
                                                             <td key={item.id} className="px-1 py-1">
-                                                                <div className="flex flex-col items-center justify-center p-1 bg-white/[0.03] rounded-lg h-12 border border-white/5">
-                                                                    <div className={cn(
-                                                                        "text-sm font-black tabular-nums",
-                                                                        avgScore !== '-' ? "text-indigo-400" : "text-slate-600"
-                                                                    )}>
-                                                                        {avgScore}
-                                                                    </div>
+                                                                <div className={cn(
+                                                                    "relative flex items-center justify-center w-full h-12 rounded-lg transition-all border",
+                                                                    isActive ? "bg-indigo-500/10 border-indigo-500/30" : "bg-white/5 border-transparent",
+                                                                    isLocked && "opacity-40 grayscale-[0.5]"
+                                                                )}>
+                                                                    <input
+                                                                        type="number"
+                                                                        inputMode="decimal"
+                                                                        step="0.1"
+                                                                        min="0"
+                                                                        max="10"
+                                                                        disabled={isLocked}
+                                                                        value={localScores[p.id]?.[item.id] ?? ''}
+                                                                        onChange={(e) => handleScoreChange(p.id, item.id, e.target.value)}
+                                                                        onBlur={() => handleBlur(p.id, item.id)}
+                                                                        className={cn(
+                                                                            "w-full h-full bg-transparent text-center font-mono font-bold text-lg outline-none placeholder-white/10",
+                                                                            isActive ? "text-indigo-400" : "text-white",
+                                                                            isLocked ? "cursor-not-allowed" : "focus:text-indigo-400"
+                                                                        )}
+                                                                        placeholder="-"
+                                                                    />
+                                                                    {isLocked && (
+                                                                        <Lock size={10} className="absolute bottom-1 right-1 text-slate-500" />
+                                                                    )}
                                                                 </div>
                                                             </td>
                                                         );
+                                                    })}
+
+                                                    <td className="sticky right-0 z-10 bg-[#0f172a]/95 backdrop-blur-sm px-4 py-3 text-center shadow-[-4px_0_10px_rgba(0,0,0,0.3)] group-hover:bg-[#151e32]/95 transition-colors">
+                                                        <div className="font-black text-lg text-indigo-400 tabular-nums">
+                                                            {displayTotal}
+                                                        </div>
+                                                    </td>
+                                                </tr>
+                                            );
+                                        })
+                                    )}
+                                </tbody>
+                            </table>
+                        </div>
+
+                        {/* Mobile Card View */}
+                        <div className="md:hidden space-y-4 p-4 bg-slate-900/50">
+                            {sortedParticipants.length === 0 ? (
+                                <div className="text-center py-10">
+                                    <AlertCircle className="mx-auto text-slate-600 mb-4 w-10 h-10" />
+                                    <p className="text-slate-500 font-bold text-sm">참가자가 없습니다.</p>
+                                </div>
+                            ) : (
+                                sortedParticipants.map((p) => {
+                                    const displayTotal = getParticipantTotal(p.id).toFixed(1);
+
+                                    return (
+                                        <div key={p.id} className="bg-slate-800/50 rounded-xl border border-white/10 overflow-hidden shadow-lg">
+                                            {/* Card Header */}
+                                            <div className="bg-slate-900/80 px-4 py-3 flex items-center justify-between border-b border-white/5">
+                                                <div className="flex items-center gap-3">
+                                                    <div className="w-8 h-8 rounded-lg bg-indigo-500/20 flex items-center justify-center font-black text-indigo-400 text-sm border border-indigo-500/30">
+                                                        {p.number}
+                                                    </div>
+                                                    <span className="font-bold text-white truncate max-w-[150px]">{p.name}</span>
+                                                </div>
+                                                <div className="text-right">
+                                                    <span className="text-[10px] text-slate-500 uppercase font-black block">Total</span>
+                                                    <span className="text-xl font-black text-indigo-400 tabular-nums leading-none">{displayTotal}</span>
+                                                </div>
+                                            </div>
+
+                                            {/* Card Content - Scoring Grid */}
+                                            <div className="p-4 grid grid-cols-2 gap-3">
+                                                {sortedItems.map(item => {
+                                                    const isTeamwork = item.label === '팀워크';
+                                                    const isDisabled = (isSolo && isTeamwork);
+
+                                                    // Spectator/Monitoring View logic
+                                                    if ((isSpectator && isLocked) || (isAdmin && !isJudgeForThisYear)) {
+                                                        const avgScore = getAverageItemScore(p.id, item.id);
+                                                        return (
+                                                            <div key={item.id} className="bg-black/20 rounded-lg p-2 border border-white/5 flex flex-col items-center">
+                                                                <span className="text-xs text-indigo-300 font-bold mb-1 truncate w-full text-center bg-indigo-500/10 px-2 py-0.5 rounded-full">{item.label}</span>
+                                                                <span className={cn("text-lg font-bold tabular-nums", avgScore !== '-' ? "text-indigo-400" : "text-slate-600")}>
+                                                                    {avgScore}
+                                                                </span>
+                                                            </div>
+                                                        );
                                                     }
 
-                                                    // Standard Input View (Judge / Admin-Judge)
+                                                    // Judge Input View
                                                     const isActive = localScores[p.id]?.[item.id] !== undefined && localScores[p.id]?.[item.id] !== '';
 
                                                     return (
-                                                        <td key={item.id} className="px-1 py-1">
-                                                            <div className={cn(
-                                                                "relative flex items-center justify-center w-full h-12 rounded-lg transition-all border",
-                                                                isActive ? "bg-indigo-500/10 border-indigo-500/30" : "bg-white/5 border-transparent",
-                                                                isLocked && "opacity-40 grayscale-[0.5]"
-                                                            )}>
-                                                                <input
-                                                                    type="number"
-                                                                    inputMode="decimal"
-                                                                    step="0.1"
-                                                                    min="0"
-                                                                    max="10"
-                                                                    disabled={isLocked}
-                                                                    value={localScores[p.id]?.[item.id] ?? ''}
-                                                                    onChange={(e) => handleScoreChange(p.id, item.id, e.target.value)}
-                                                                    onBlur={() => handleBlur(p.id, item.id)}
-                                                                    className={cn(
-                                                                        "w-full h-full bg-transparent text-center font-mono font-bold text-lg outline-none placeholder-white/10",
-                                                                        isActive ? "text-indigo-400" : "text-white",
-                                                                        isLocked ? "cursor-not-allowed" : "focus:text-indigo-400"
-                                                                    )}
-                                                                    placeholder="-"
-                                                                />
-                                                                {isLocked && (
-                                                                    <Lock size={10} className="absolute bottom-1 right-1 text-slate-500" />
-                                                                )}
-                                                            </div>
-                                                        </td>
+                                                        <div key={item.id} className={cn(
+                                                            "relative rounded-xl border transition-all p-2 flex flex-col items-center",
+                                                            isActive ? "bg-indigo-500/10 border-indigo-500/30" : "bg-white/5 border-white/10",
+                                                            isDisabled && "opacity-30 pointer-events-none"
+                                                        )}>
+                                                            <label className="text-xs text-indigo-300 font-bold mb-1 uppercase tracking-tight truncate w-full text-center bg-indigo-500/10 px-2 py-0.5 rounded-full">
+                                                                {item.label}
+                                                            </label>
+                                                            {isDisabled ? (
+                                                                <span className="text-slate-600 font-bold py-2">-</span>
+                                                            ) : (
+                                                                <div className="w-full relative">
+                                                                    <input
+                                                                        type="number"
+                                                                        inputMode="decimal"
+                                                                        step="0.1"
+                                                                        min="0"
+                                                                        max="10"
+                                                                        disabled={isLocked}
+                                                                        value={localScores[p.id]?.[item.id] ?? ''}
+                                                                        onChange={(e) => handleScoreChange(p.id, item.id, e.target.value)}
+                                                                        onBlur={() => handleBlur(p.id, item.id)}
+                                                                        className={cn(
+                                                                            "w-full bg-transparent text-center font-mono font-black text-2xl outline-none py-1",
+                                                                            isActive ? "text-indigo-400" : "text-white",
+                                                                            isLocked ? "cursor-not-allowed" : "focus:text-indigo-400"
+                                                                        )}
+                                                                        placeholder="-"
+                                                                    />
+                                                                    {isLocked && <Lock size={12} className="absolute bottom-2 right-2 text-slate-500" />}
+                                                                </div>
+                                                            )}
+                                                        </div>
                                                     );
                                                 })}
-
-                                                <td className="sticky right-0 z-10 bg-[#0f172a]/95 backdrop-blur-sm px-4 py-3 text-center shadow-[-4px_0_10px_rgba(0,0,0,0.3)] group-hover:bg-[#151e32]/95 transition-colors">
-                                                    <div className="font-black text-lg text-indigo-400 tabular-nums">
-                                                        {displayTotal}
-                                                    </div>
-                                                </td>
-                                            </tr>
-                                        );
-                                    })
-                                )}
-                            </tbody>
-                        </table>
-                    </div>
+                                            </div>
+                                        </div>
+                                    );
+                                })
+                            )}
+                        </div>
+                    </>
                 )}
             </div>
 

@@ -13,6 +13,7 @@ function App() {
 
     const [sidebarWidth, setSidebarWidth] = React.useState(320);
     const [isResizing, setIsResizing] = React.useState(false);
+    const [isMobileSidebarOpen, setIsMobileSidebarOpen] = React.useState(false);
 
     const startResizing = React.useCallback(() => {
         setIsResizing(true);
@@ -67,25 +68,37 @@ function App() {
 
     return (
         <div className={`flex h-screen bg-slate-950 text-slate-100 overflow-hidden font-sans selection:bg-indigo-500/30 ${isResizing ? 'cursor-col-resize select-none' : ''}`}>
-            {/* Sidebar background gradient */}
+            {/* Mobile Sidebar Backdrop */}
+            {isMobileSidebarOpen && (
+                <div
+                    className="fixed inset-0 bg-black/60 backdrop-blur-sm z-40 md:hidden"
+                    onClick={() => setIsMobileSidebarOpen(false)}
+                />
+            )}
+
+            {/* Sidebar background gradient (Desktop only) */}
             <div
-                className="absolute top-0 left-0 h-full bg-gradient-to-b from-indigo-500/5 to-transparent pointer-events-none"
+                className="absolute top-0 left-0 h-full bg-gradient-to-b from-indigo-500/5 to-transparent pointer-events-none hidden md:block"
                 style={{ width: sidebarWidth }}
             />
 
-            <Sidebar width={sidebarWidth} />
+            <Sidebar
+                width={sidebarWidth}
+                isOpen={isMobileSidebarOpen}
+                onClose={() => setIsMobileSidebarOpen(false)}
+            />
 
-            {/* Resize Handle */}
+            {/* Resize Handle (Desktop only) */}
             <div
-                className={`w-1 hover:w-1.5 h-full bg-white/5 hover:bg-indigo-500/50 cursor-col-resize transition-all z-30 relative group`}
+                className={`hidden md:block w-1 hover:w-1.5 h-full bg-white/5 hover:bg-indigo-500/50 cursor-col-resize transition-all z-30 relative group`}
                 onMouseDown={startResizing}
             >
                 <div className="absolute inset-y-0 -left-1 -right-1" /> {/* Larger hit area */}
             </div>
 
             <div className="flex-1 flex flex-col relative min-w-0">
-                <Header />
-                <main className="flex-1 overflow-y-auto bg-[radial-gradient(ellipse_at_top,_var(--tw-gradient-stops))] from-slate-900 to-slate-950 p-8">
+                <Header onMenuClick={() => setIsMobileSidebarOpen(true)} />
+                <main className="flex-1 overflow-y-auto bg-[radial-gradient(ellipse_at_top,_var(--tw-gradient-stops))] from-slate-900 to-slate-950 p-4 md:p-8">
                     <MainContent />
                 </main>
             </div>

@@ -1,5 +1,4 @@
-import React from 'react';
-import { User, LogOut, Shield, PenTool, Layout, ChevronRight, Calendar, Layers } from 'lucide-react';
+import { User, LogOut, Shield, PenTool, Layout, ChevronRight, Calendar, Layers, Menu } from 'lucide-react';
 import useStore from '../store/useStore';
 import { clsx } from 'clsx';
 import { twMerge } from 'tailwind-merge';
@@ -8,7 +7,7 @@ function cn(...inputs) {
     return twMerge(clsx(inputs));
 }
 
-const Header = () => {
+const Header = ({ onMenuClick }) => {
     const { currentUser, logout, selectedCategoryId, years } = useStore();
 
     // Find current year and category names for breadcrumbs
@@ -35,9 +34,15 @@ const Header = () => {
     const RoleIcon = roleConfig.icon;
 
     return (
-        <header className="h-20 glass border-b border-white/10 flex items-center justify-between px-8 z-10 shrink-0">
+        <header className="h-16 md:h-20 glass border-b border-white/10 flex items-center justify-between px-4 md:px-8 z-10 shrink-0">
             <div className="flex flex-col">
                 <div className="flex items-center gap-1 text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-1">
+                    <button
+                        onClick={onMenuClick}
+                        className="mr-2 p-1 -ml-1 text-slate-400 hover:text-white md:hidden"
+                    >
+                        <Menu size={18} />
+                    </button>
                     <Calendar size={10} className="text-indigo-400/50" />
                     <span>{yearName}</span>
                     <ChevronRight size={10} className="opacity-30" />

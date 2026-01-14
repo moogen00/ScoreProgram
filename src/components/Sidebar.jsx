@@ -9,7 +9,7 @@ function cn(...inputs) {
     return twMerge(clsx(inputs));
 }
 
-const Sidebar = ({ width }) => {
+const Sidebar = ({ width, isOpen, onClose }) => {
     const {
         years,
         selectedCategoryId,
@@ -111,6 +111,11 @@ const Sidebar = ({ width }) => {
         }
     };
 
+    // Helper to close sidebar on mobile nav
+    const handleNavClick = () => {
+        onClose?.();
+    };
+
     const CategoryItem = ({ cat, yearId }) => {
         const dragControls = useDragControls();
         const isActive = selectedCategoryId === cat.id;
@@ -141,6 +146,7 @@ const Sidebar = ({ width }) => {
                             if (['ADMIN', 'ROOT_ADMIN', 'JUDGE', 'SPECTATOR'].includes(userRole)) {
                                 setActiveView('scorer');
                             }
+                            handleNavClick();
                         }}
                         className={cn(
                             "sidebar-item w-full flex items-center gap-2 pl-3 relative cursor-pointer",
@@ -154,6 +160,7 @@ const Sidebar = ({ width }) => {
                                 if (['ADMIN', 'ROOT_ADMIN', 'JUDGE', 'SPECTATOR'].includes(userRole)) {
                                     setActiveView('scorer');
                                 }
+                                handleNavClick();
                             }
                         }}
                     >
@@ -205,11 +212,25 @@ const Sidebar = ({ width }) => {
     const userRole = currentUser?.role || 'USER';
 
     return (
-        <aside className="h-full glass border-r border-white/10 flex flex-col z-20 shrink-0" style={{ width }}>
+        <aside
+            className={cn(
+                "glass border-r border-white/10 flex flex-col z-20 shrink-0 transition-transform duration-300 ease-in-out",
+                // Mobile styles
+                "fixed inset-y-0 left-0 h-full w-[280px] bg-slate-950/95 backdrop-blur-xl z-50",
+                // Desktop styles
+                "md:relative md:translate-x-0 md:bg-transparent md:z-20 md:w-[var(--sidebar-width)]",
+                // Open/Close logic
+                isOpen ? "translate-x-0 shadow-2xl" : "-translate-x-full"
+            )}
+            style={{ '--sidebar-width': `${width}px` }}
+        >
             {(userRole === 'ADMIN' || userRole === 'ROOT_ADMIN') && (
                 <div className="p-4 pb-0">
                     <button
-                        onClick={() => setActiveView('admin')}
+                        onClick={() => {
+                            setActiveView('admin');
+                            handleNavClick();
+                        }}
                         className={cn(
                             "w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all font-black text-xs uppercase tracking-widest",
                             activeView === 'admin' || (!activeView && (userRole === 'ADMIN' || userRole === 'ROOT_ADMIN'))
