@@ -105,41 +105,43 @@ const LoginPage = () => {
                             <div className="relative flex justify-center text-[10px] uppercase"><span className="bg-slate-900 px-2 text-slate-600 font-bold">Public Access</span></div>
                         </div>
 
-                        <button
-                            onClick={async () => {
-                                try {
-                                    await signInAnonymously(auth);
-                                    login({
-                                        email: 'guest@score.com',
-                                        name: 'Spectator',
-                                        role: 'SPECTATOR',
-                                        picture: null
-                                    });
-                                } catch (error) {
-                                    console.error("Spectator login failed", error);
+                        {import.meta.env.VITE_ENABLE_SPECTATOR === 'true' && (
+                            <button
+                                onClick={async () => {
+                                    try {
+                                        await signInAnonymously(auth);
+                                        login({
+                                            email: 'guest@score.com',
+                                            name: 'Spectator',
+                                            role: 'SPECTATOR',
+                                            picture: null
+                                        });
+                                    } catch (error) {
+                                        console.error("Spectator login failed", error);
 
-                                    // Debug Config Loading
-                                    const config = auth.app.options;
-                                    const isConfigLoaded = config && config.apiKey && config.authDomain;
+                                        // Debug Config Loading
+                                        const config = auth.app.options;
+                                        const isConfigLoaded = config && config.apiKey && config.authDomain;
 
-                                    let msg = "관람객 입장 중 오류가 발생했습니다.";
-                                    if (!isConfigLoaded) {
-                                        msg += "\n\n[설정 오류] Firebase 환경변수(.env)가 로드되지 않았습니다.\n.env 파일을 확인하거나 서버를 재시작해주세요.";
-                                    } else if (error.code === 'auth/configuration-not-found') {
-                                        msg += "\n\n[Firebase 설정 원인]\nFirebase Console의 'Authentication' 메뉴가 활성화되지 않았습니다.\nConsole로 이동하여 'Authentication' > '시작하기'를 클릭해주세요.";
-                                    } else if (error.code === 'auth/operation-not-allowed' || error.code === 'auth/admin-restricted-operation') {
-                                        msg += "\n\n[권한 원인]\nFirebase Console에서 '익명(Anonymous)' 로그인이 활성화되지 않았습니다.\nAuthentication -> Sign-in method 탭에서 '익명'을 찾아 사용 설정해주세요.";
-                                    } else {
-                                        msg += `\n(${error.code}: ${error.message})`;
+                                        let msg = "관람객 입장 중 오류가 발생했습니다.";
+                                        if (!isConfigLoaded) {
+                                            msg += "\n\n[설정 오류] Firebase 환경변수(.env)가 로드되지 않았습니다.\n.env 파일을 확인하거나 서버를 재시작해주세요.";
+                                        } else if (error.code === 'auth/configuration-not-found') {
+                                            msg += "\n\n[Firebase 설정 원인]\nFirebase Console의 'Authentication' 메뉴가 활성화되지 않았습니다.\nConsole로 이동하여 'Authentication' > '시작하기'를 클릭해주세요.";
+                                        } else if (error.code === 'auth/operation-not-allowed' || error.code === 'auth/admin-restricted-operation') {
+                                            msg += "\n\n[권한 원인]\nFirebase Console에서 '익명(Anonymous)' 로그인이 활성화되지 않았습니다.\nAuthentication -> Sign-in method 탭에서 '익명'을 찾아 사용 설정해주세요.";
+                                        } else {
+                                            msg += `\n(${error.code}: ${error.message})`;
+                                        }
+                                        alert(msg);
                                     }
-                                    alert(msg);
-                                }
-                            }}
-                            className="w-full py-3 px-4 rounded-xl border border-indigo-500/30 bg-indigo-500/10 hover:bg-indigo-500/20 transition-all font-bold text-sm text-indigo-300 flex items-center justify-center gap-2 group"
-                        >
-                            <Users size={16} className="text-indigo-400 group-hover:scale-110 transition-transform" />
-                            관람객 입장 (Spectator Entry)
-                        </button>
+                                }}
+                                className="w-full py-3 px-4 rounded-xl border border-indigo-500/30 bg-indigo-500/10 hover:bg-indigo-500/20 transition-all font-bold text-sm text-indigo-300 flex items-center justify-center gap-2 group"
+                            >
+                                <Users size={16} className="text-indigo-400 group-hover:scale-110 transition-transform" />
+                                관람객 입장 (Spectator Entry)
+                            </button>
+                        )}
                         {/* Custom Email Login Box */}
                         <div className="flex flex-col gap-2 p-3 bg-white/5 border border-white/10 rounded-xl mt-2">
                             <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest text-left px-1">임의 계정 테스트 (Custom Email Login)</p>
