@@ -376,15 +376,7 @@ const Scorer = () => {
                                         </tr>
                                     ) : (
                                         [...rankedParticipants]
-                                            .sort((a, b) => {
-                                                // If Monitoring/Spectator, we might want score sort, but judges usually want number sort.
-                                                // However, for consistency with Leaderboard, if Monitoring/Spectator, we sort by score (which is already done in rankedParticipants).
-                                                // If NOT monitoring (Judge mode), we sort by number.
-                                                if (isJudge && !isAdmin) {
-                                                    return parseInt(a.number || 0, 10) - parseInt(b.number || 0, 10);
-                                                }
-                                                return 0; // Keep the order from rankedParticipants (score desc)
-                                            })
+                                            .sort((a, b) => parseInt(a.number || 0, 10) - parseInt(b.number || 0, 10))
                                             .map((p) => {
                                                 const displayTotal = getParticipantTotal(p.id).toFixed(1);
 
@@ -397,7 +389,7 @@ const Scorer = () => {
                                                             <div className="flex items-center gap-2">
                                                                 <div className="font-bold text-white text-base truncate max-w-[150px]">{p.name}</div>
                                                                 {((isAdmin && !isJudgeForThisYear) || (isSpectator && isLocked)) && (
-                                                                    <span className="text-[10px] font-black px-1.5 py-0.5 rounded bg-indigo-500/20 text-indigo-400 border border-indigo-500/30">
+                                                                    <span className="text-[12px] font-black px-2 py-0.5 rounded bg-rose-500/20 text-rose-400 border border-rose-500/30 shadow-[0_0_10px_rgba(244,63,94,0.3)]">
                                                                         R{p.rank}
                                                                     </span>
                                                                 )}
@@ -490,12 +482,7 @@ const Scorer = () => {
                                 </div>
                             ) : (
                                 [...rankedParticipants]
-                                    .sort((a, b) => {
-                                        if (isJudge && !isAdmin) {
-                                            return parseInt(a.number || 0, 10) - parseInt(b.number || 0, 10);
-                                        }
-                                        return 0;
-                                    })
+                                    .sort((a, b) => parseInt(a.number || 0, 10) - parseInt(b.number || 0, 10))
                                     .map((p) => {
                                         const displayTotal = getParticipantTotal(p.id).toFixed(1);
 
@@ -509,7 +496,7 @@ const Scorer = () => {
                                                         </div>
                                                         <span className="font-bold text-white truncate max-w-[120px]">{p.name}</span>
                                                         {((isAdmin && !isJudgeForThisYear) || (isSpectator && isLocked)) && (
-                                                            <span className="text-[10px] font-black px-1.5 py-0.5 rounded bg-indigo-500/20 text-indigo-400 border border-indigo-500/30">
+                                                            <span className="text-[12px] font-black px-2 py-0.5 rounded bg-rose-500/20 text-rose-400 border border-rose-500/30 shadow-[0_0_10px_rgba(244,63,94,0.3)]">
                                                                 R{p.rank}
                                                             </span>
                                                         )}
