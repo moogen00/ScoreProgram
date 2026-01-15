@@ -7,16 +7,17 @@ function cn(...inputs) {
     return twMerge(clsx(inputs));
 }
 
-const Header = ({ onMenuClick }) => {
-    const { currentUser, logout, selectedCategoryId, years } = useStore();
+const Header = ({ onMenuClick, onRequestLogout }) => {
+    const { currentUser, selectedCategoryId, years } = useStore();
 
     // Find current year and category names for breadcrumbs
     const findInfo = () => {
+        if (!selectedCategoryId) return { yearName: 'HOME', catName: 'Dashboard' };
         for (const year of years) {
             const cat = year?.categories?.find(c => c.id === selectedCategoryId);
             if (cat) return { yearName: year.name || '대회 연도 미정', catName: cat.name || '종목 미지정' };
         }
-        return { yearName: '대회 연도 미정', catName: '종목 미지정' };
+        return { yearName: 'HOME', catName: 'Dashboard' };
     };
 
     const { yearName, catName } = findInfo();
@@ -50,7 +51,7 @@ const Header = ({ onMenuClick }) => {
                     <span className="text-indigo-400">{catName}</span>
                 </div>
                 <h2 className="text-sm font-semibold text-white/90">
-                    현황: {catName}
+                    {catName === 'Dashboard' ? '대시보드 개요' : `현황: ${catName}`}
                 </h2>
             </div>
 
@@ -76,7 +77,7 @@ const Header = ({ onMenuClick }) => {
                 </div>
 
                 <button
-                    onClick={logout}
+                    onClick={onRequestLogout}
                     className="p-2.5 rounded-xl bg-white/5 hover:bg-rose-500/10 text-slate-400 hover:text-rose-400 transition-all border border-white/5 hover:border-rose-500/20 active:scale-95 group"
                     title="로그아웃"
                 >

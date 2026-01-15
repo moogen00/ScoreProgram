@@ -9,7 +9,7 @@ function cn(...inputs) {
     return twMerge(clsx(inputs));
 }
 
-const Sidebar = ({ width, isOpen, onClose }) => {
+const Sidebar = ({ width, isOpen, onClose, onRequestLogout }) => {
     const {
         years,
         selectedCategoryId,
@@ -17,7 +17,6 @@ const Sidebar = ({ width, isOpen, onClose }) => {
         activeView,
         setActiveView,
         currentUser,
-        logout,
         addYear,
         updateYear,
         deleteYear,
@@ -233,7 +232,7 @@ const Sidebar = ({ width, isOpen, onClose }) => {
                         }}
                         className={cn(
                             "w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all font-black text-xs uppercase tracking-widest",
-                            activeView === 'admin' || (!activeView && (userRole === 'ADMIN' || userRole === 'ROOT_ADMIN'))
+                            activeView === 'admin'
                                 ? "bg-rose-600 text-white shadow-lg shadow-rose-600/20"
                                 : "bg-rose-500/10 text-rose-400 hover:bg-rose-500/20 border border-rose-500/20"
                         )}
@@ -252,6 +251,7 @@ const Sidebar = ({ width, isOpen, onClose }) => {
                     <div
                         className="w-10 h-10 rounded-xl bg-indigo-500 flex items-center justify-center shadow-[0_0_20px_rgba(99,102,241,0.4)] cursor-pointer hover:scale-110 active:scale-95 transition-transform"
                         onClick={() => useStore.getState().resetNavigation()}
+                        title="대쉬보드로 이동"
                     >
                         <Trophy className="text-white w-6 h-6" />
                     </div>
@@ -268,23 +268,25 @@ const Sidebar = ({ width, isOpen, onClose }) => {
                                 <button onClick={handleSaveCompName} className="text-emerald-400 p-1"><Check size={14} /></button>
                             </div>
                         ) : (
-                            <div className="flex items-center justify-between group">
+                            <div>
                                 <h1
                                     className="text-xl font-black bg-gradient-to-r from-white to-white/60 bg-clip-text text-transparent truncate cursor-pointer hover:scale-105 transition-transform"
                                     onClick={() => useStore.getState().resetNavigation()}
                                 >
                                     Score
                                 </h1>
-                                {(userRole === 'ADMIN' || userRole === 'ROOT_ADMIN') && (
-                                    <button onClick={() => setIsEditingComp(true)} className="opacity-0 group-hover:opacity-100 p-1 text-slate-500 hover:text-white transition-opacity">
-                                        <Edit2 size={12} />
-                                    </button>
-                                )}
                             </div>
                         )}
-                        <p className="text-[10px] text-slate-400 uppercase tracking-widest font-black truncate">
-                            {competitionName}
-                        </p>
+                        <div className="flex items-center justify-between group">
+                            <p className="text-[10px] text-slate-400 uppercase tracking-widest font-black truncate">
+                                {competitionName}
+                            </p>
+                            {(!isEditingComp && (userRole === 'ADMIN' || userRole === 'ROOT_ADMIN')) && (
+                                <button onClick={() => setIsEditingComp(true)} className="opacity-0 group-hover:opacity-100 p-1 text-slate-500 hover:text-white transition-opacity">
+                                    <Edit2 size={12} />
+                                </button>
+                            )}
+                        </div>
                     </div>
                 </div>
             </div>
@@ -446,7 +448,7 @@ const Sidebar = ({ width, isOpen, onClose }) => {
                             {userRole}
                         </p>
                     </div>
-                    <button onClick={logout} className="p-2 text-slate-500 hover:text-rose-400 hover:bg-rose-500/10 rounded-lg transition-all opacity-0 group-hover:opacity-100">
+                    <button onClick={onRequestLogout} className="p-2 text-slate-500 hover:text-rose-400 hover:bg-rose-500/10 rounded-lg transition-all opacity-0 group-hover:opacity-100">
                         <LogOut size={14} />
                     </button>
                 </div>

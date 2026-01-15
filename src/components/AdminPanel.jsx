@@ -18,10 +18,11 @@ const AdminPanel = () => {
         admins, addAdmin, removeAdmin, competitionName, setCompetitionName,
         seedRandomScores, clearYearScores,
         exportData, importData, clearAllData,
-        currentUser
+        currentUser,
+        adminTab, setAdminTab
     } = useStore();
 
-    const [activeTab, setActiveTab] = useState('scoring'); // 'scoring', 'hierarchy', 'judges', 'participants'
+
 
     // Form states
     const [newItemLabel, setNewItemLabel] = useState('');
@@ -195,10 +196,10 @@ const AdminPanel = () => {
                     ].map(tab => (
                         <button
                             key={tab.id}
-                            onClick={() => setActiveTab(tab.id)}
+                            onClick={() => setAdminTab(tab.id)}
                             className={cn(
                                 "flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-bold transition-all whitespace-nowrap",
-                                activeTab === tab.id ? "bg-indigo-600 text-white shadow-lg" : "text-slate-400 hover:text-white"
+                                adminTab === tab.id ? "bg-indigo-600 text-white shadow-lg" : "text-slate-400 hover:text-white"
                             )}
                         >
                             <tab.icon size={14} />
@@ -208,7 +209,7 @@ const AdminPanel = () => {
                 </div>
             </div>
 
-            {activeTab === 'scoring' && (
+            {adminTab === 'scoring' && (
                 <div className="glass-card p-8 animate-in fade-in slide-in-from-bottom-2 duration-500">
                     <div className="flex items-center gap-2 mb-6">
                         <List className="text-indigo-400" />
@@ -244,7 +245,7 @@ const AdminPanel = () => {
                 </div>
             )}
 
-            {activeTab === 'participants' && (
+            {adminTab === 'participants' && (
                 <div className="glass-card p-8 animate-in fade-in slide-in-from-bottom-2 duration-500">
                     <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-8">
                         <div className="flex items-center gap-2">
@@ -448,7 +449,7 @@ const AdminPanel = () => {
                 </div>
             )}
 
-            {activeTab === 'judges' && (
+            {adminTab === 'judges' && (
                 <div className="glass-card p-8 animate-in fade-in slide-in-from-bottom-2 duration-500">
                     <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-8">
                         <div className="flex items-center gap-2">
@@ -489,7 +490,7 @@ const AdminPanel = () => {
                 </div>
             )}
 
-            {activeTab === 'settings' && (
+            {adminTab === 'settings' && (
                 <div className="space-y-6">
                     <div className="glass-card p-8 animate-in fade-in slide-in-from-bottom-2 duration-500">
                         <div className="flex items-center gap-2 mb-6">
@@ -542,7 +543,7 @@ const AdminPanel = () => {
                 </div>
             )}
 
-            {activeTab === 'data' && (
+            {adminTab === 'data' && (
                 <div className="space-y-6">
                     <div className="glass-card p-8 animate-in fade-in slide-in-from-bottom-2 duration-500">
                         <div className="flex items-center gap-2 mb-6">
@@ -656,7 +657,7 @@ const AdminPanel = () => {
                 </div>
             )}
 
-            {activeTab === 'admins' && currentUser?.role === 'ROOT_ADMIN' && (
+            {adminTab === 'admins' && currentUser?.role === 'ROOT_ADMIN' && (
                 <div className="glass-card p-8 animate-in fade-in slide-in-from-bottom-2 duration-500">
                     <div className="flex items-center gap-2 mb-6">
                         <Shield className="text-rose-400" />

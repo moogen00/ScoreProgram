@@ -3,6 +3,7 @@ import useStore from '../store/useStore';
 import Leaderboard from './Leaderboard';
 import Scorer from './Scorer';
 import AdminPanel from './AdminPanel';
+import Dashboard from './Dashboard';
 import { motion, AnimatePresence } from 'framer-motion';
 
 const MainContent = () => {
@@ -14,7 +15,7 @@ const MainContent = () => {
 
     const renderContent = () => {
         const isAdmin = role === 'ADMIN' || role === 'ROOT_ADMIN';
-        const view = activeView || (isAdmin ? 'admin' : 'scorer');
+        const view = activeView;
 
         if (view === 'admin' && !isAdmin) {
             // Security breach: Non-admin trying to access admin view
@@ -29,8 +30,9 @@ const MainContent = () => {
             case 'scorer':
                 return <Scorer key="scorer" />;
             case 'leaderboard':
-            default:
                 return <Leaderboard key="leaderboard" />;
+            default:
+                return <Dashboard key="dashboard" />;
         }
     };
 

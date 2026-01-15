@@ -33,6 +33,8 @@ const useStore = create((set, get) => ({
     participants: {}, // { [categoryId]: [ { id, number, name } ] }
     scores: {}, // { [categoryId]: { [participantId]: { [judgeEmail]: { [scoringItemId]: score } } } }
 
+    adminTab: 'scoring',
+
     // Auth Actions
     login: (userData) => {
         // If userData has a role (e.g. from Spectator login), use it. Default to USER.
@@ -88,15 +90,35 @@ const useStore = create((set, get) => ({
     },
     setSelectedCategoryId: (id) => {
         set({ selectedCategoryId: id });
-        window.history.pushState({ activeView: get().activeView, selectedCategoryId: id }, '');
+        window.history.pushState({
+            activeView: get().activeView,
+            selectedCategoryId: id,
+            adminTab: get().adminTab
+        }, '');
     },
     setActiveView: (view) => {
         set({ activeView: view });
-        window.history.pushState({ activeView: view, selectedCategoryId: get().selectedCategoryId }, '');
+        window.history.pushState({
+            activeView: view,
+            selectedCategoryId: get().selectedCategoryId,
+            adminTab: get().adminTab
+        }, '');
+    },
+    setAdminTab: (tab) => {
+        set({ adminTab: tab });
+        window.history.pushState({
+            activeView: get().activeView,
+            selectedCategoryId: get().selectedCategoryId,
+            adminTab: tab
+        }, '');
     },
     resetNavigation: () => {
-        set({ activeView: null, selectedCategoryId: '' });
-        window.history.pushState({ activeView: null, selectedCategoryId: '' }, '');
+        set({ activeView: null, selectedCategoryId: '', adminTab: 'scoring' });
+        window.history.pushState({
+            activeView: null,
+            selectedCategoryId: '',
+            adminTab: 'scoring'
+        }, '');
     },
 
     // Scorer Actions

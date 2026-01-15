@@ -5,15 +5,20 @@ import MainContent from './components/MainContent';
 import LoginPage from './components/LoginPage';
 import DebugPanel from './components/DebugPanel';
 import useStore from './store/useStore';
+import LogoutConfirmModal from './components/LogoutConfirmModal';
 
 function App() {
     window.store = useStore;
     const currentUser = useStore((state) => state.currentUser);
     const initSync = useStore((state) => state.initSync);
+    const logout = useStore((state) => state.logout);
 
     const [sidebarWidth, setSidebarWidth] = React.useState(320);
     const [isResizing, setIsResizing] = React.useState(false);
     const [isMobileSidebarOpen, setIsMobileSidebarOpen] = React.useState(false);
+    const [isLogoutModalOpen, setIsLogoutModalOpen] = React.useState(false);
+
+    const isTrappingRef = React.useRef(false);
 
     const startResizing = React.useCallback(() => {
         setIsResizing(true);
@@ -47,20 +52,47 @@ function App() {
         // Handle back/forward navigation
         const handlePopState = (event) => {
             if (event.state) {
-                const { activeView, selectedCategoryId } = event.state;
-                useStore.setState({ activeView, selectedCategoryId });
+                if (event.state.type === 'exit-trap') {
+                    // Back button reached the "end" of our app history
+                    isTrappingRef.current = true;
+                    setIsLogoutModalOpen(true);
+                    // Stay in the app by going "forward" back to the previous view
+                    window.history.forward();
+                } else {
+                    const { activeView, selectedCategoryId, adminTab } = event.state;
+                    useStore.setState({ activeView, selectedCategoryId, adminTab: adminTab || 'scoring' });
+
+                    // Only close the modal if we are NOT in the middle of trapping the back button
+                    if (!isTrappingRef.current) {
+                        setIsLogoutModalOpen(false);
+                    }
+                }
             }
+            // Reset the trap flag for the next event
+            setTimeout(() => {
+                isTrappingRef.current = false;
+            }, 0);
         };
 
         window.addEventListener('popstate', handlePopState);
 
-        // Push initial state
-        if (!window.history.state) {
-            window.history.replaceState({ activeView: null, selectedCategoryId: '' }, '');
+        // Setup History Trap if logged in
+        if (currentUser) {
+            if (!window.history.state || window.history.state.type !== 'initial') {
+                // 1. Mark the exit trap (if user goes back from here, they leave the site)
+                window.history.replaceState({ type: 'exit-trap' }, '');
+                // 2. Push the actual starting state
+                window.history.pushState({
+                    activeView: null,
+                    selectedCategoryId: '',
+                    adminTab: 'scoring',
+                    type: 'initial'
+                }, '');
+            }
         }
 
         return () => window.removeEventListener('popstate', handlePopState);
-    }, [initSync]);
+    }, [initSync, currentUser]);
 
     if (!currentUser) {
         return <LoginPage />;
@@ -86,6 +118,7 @@ function App() {
                 width={sidebarWidth}
                 isOpen={isMobileSidebarOpen}
                 onClose={() => setIsMobileSidebarOpen(false)}
+                onRequestLogout={() => setIsLogoutModalOpen(true)}
             />
 
             {/* Resize Handle (Desktop only) */}
@@ -97,12 +130,24 @@ function App() {
             </div>
 
             <div className="flex-1 flex flex-col relative min-w-0">
-                <Header onMenuClick={() => setIsMobileSidebarOpen(true)} />
+                <Header
+                    onMenuClick={() => setIsMobileSidebarOpen(true)}
+                    onRequestLogout={() => setIsLogoutModalOpen(true)}
+                />
                 <main className="flex-1 overflow-y-auto bg-[radial-gradient(ellipse_at_top,_var(--tw-gradient-stops))] from-slate-900 to-slate-950 p-4 md:p-8">
                     <MainContent />
                 </main>
             </div>
             <DebugPanel />
+
+            <LogoutConfirmModal
+                isOpen={isLogoutModalOpen}
+                onConfirm={() => {
+                    setIsLogoutModalOpen(false);
+                    logout();
+                }}
+                onCancel={() => setIsLogoutModalOpen(false)}
+            />
         </div>
     );
 }
