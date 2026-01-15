@@ -39,7 +39,13 @@ const useStore = create((set, get) => ({
     login: (userData) => {
         // If userData has a role (e.g. from Spectator login), use it. Default to USER.
         const role = userData.role || 'USER';
-        set({ currentUser: { ...userData, role } });
+        // Normalize email to lowercase
+        const normalizedData = {
+            ...userData,
+            email: userData.email.toLowerCase(),
+            role
+        };
+        set({ currentUser: normalizedData });
         get().syncUserRole();
 
         // Force refresh scores to ensure we get data if rules were restrictive before login
@@ -57,30 +63,46 @@ const useStore = create((set, get) => ({
         const { currentUser, judgesByYear, admins } = get();
         if (!currentUser) return;
 
-        // If explicitly Spectator, FORCE role assignment and don't overwrite
+        // If explicitly Spectator
         if (currentUser.email === 'guest@score.com') {
             if (currentUser.role !== 'SPECTATOR') {
                 set({ currentUser: { ...currentUser, role: 'SPECTATOR' } });
-                console.log(`[Auth] User Role corrected: ${currentUser.email} -> SPECTATOR`);
             }
             return;
         }
 
-        let role = 'USER';
-        const allJudgesEmails = Object.values(judgesByYear).flat().map(j => j.email);
-        const allAdminEmails = admins.map(a => a.email);
+        let role = ''; // Default to empty to detect if found
 
-        if (ROOT_ADMIN_EMAILS.includes(currentUser.email)) {
+        // 1. Root Admin Check
+        const rootAdmins = (import.meta.env.VITE_ROOT_ADMIN_EMAILS || '').split(',').map(e => e.trim());
+        if (rootAdmins.includes(currentUser.email)) {
             role = 'ROOT_ADMIN';
-        } else if (allAdminEmails.includes(currentUser.email)) {
-            role = 'ADMIN';
-        } else if (allJudgesEmails.includes(currentUser.email) || currentUser.email === 'judge@example.com') {
-            role = 'JUDGE';
         }
 
-        if (currentUser.role !== role) {
-            set({ currentUser: { ...currentUser, role } });
-            console.log(`[Auth] User Role updated: ${currentUser.email} -> ${role}`);
+        // 2. Admin Check
+        if (!role && admins.some(a => a.email === currentUser.email)) {
+            role = 'ADMIN';
+        }
+
+        // 3. Judge Check & Assigned Years Calculation
+        const assignedYears = [];
+        Object.entries(judgesByYear).forEach(([yId, list]) => {
+            if (list.some(j => j.email === currentUser.email)) {
+                if (!role) role = 'JUDGE';
+                assignedYears.push(yId);
+            }
+        });
+
+        // 4. Default to USER if nothing found
+        if (!role) role = 'USER';
+
+        // Update if changed (role or assignedYears)
+        const currentAssigned = currentUser.assignedYears ? currentUser.assignedYears.join(',') : '';
+        const newAssigned = assignedYears.join(',');
+
+        if (currentUser.role !== role || currentAssigned !== newAssigned) {
+            set({ currentUser: { ...currentUser, role, assignedYears } });
+            console.log(`[Auth] User Role updated: ${currentUser.email} -> ${role}, Assigned: [${newAssigned}]`);
         }
     },
 
@@ -137,7 +159,7 @@ const useStore = create((set, get) => ({
             return;
         }
 
-        const docId = `${categoryId}_${participantId}_${currentUser.email}`;
+        const docId = `${categoryId}_${participantId}_${currentUser.email.toLowerCase()}`;
         const scoreRef = doc(db, 'scores', docId);
         const snap = await getDoc(scoreRef);
 
@@ -153,7 +175,7 @@ const useStore = create((set, get) => ({
             category: genreAndCat.split(' ').slice(1).join(' ') || genreAndCat,
             categoryId,
             participantId,
-            judgeEmail: currentUser.email,
+            judgeEmail: currentUser.email.toLowerCase(),
             values: {
                 ...currentValues,
                 [itemId]: parseFloat(score)
@@ -290,20 +312,22 @@ const useStore = create((set, get) => ({
 
     // Judge Actions
     addJudge: async (yearId, email, name) => {
-        await setDoc(doc(db, 'judges', `${yearId}_${email}`), { yearId, email, name });
+        const lowerEmail = email.toLowerCase();
+        await setDoc(doc(db, 'judges', `${yearId}_${lowerEmail}`), { yearId, email: lowerEmail, name });
     },
 
     removeJudge: async (yearId, email) => {
-        await deleteDoc(doc(db, 'judges', `${yearId}_${email}`));
+        await deleteDoc(doc(db, 'judges', `${yearId}_${email.toLowerCase()}`));
     },
 
     // Admin Management Actions
     addAdmin: async (email, name) => {
-        await setDoc(doc(db, 'admins', email), { email, name });
+        const lowerEmail = email.toLowerCase();
+        await setDoc(doc(db, 'admins', lowerEmail), { email: lowerEmail, name });
     },
 
     removeAdmin: async (email) => {
-        await deleteDoc(doc(db, 'admins', email));
+        await deleteDoc(doc(db, 'admins', email.toLowerCase()));
     },
 
     // Participant Actions
@@ -342,14 +366,20 @@ const useStore = create((set, get) => ({
     exportData: () => {
         const state = get();
         const exportObj = {
-            version: "1.1",
+            version: "1.3", // Version bump
             timestamp: new Date().toISOString(),
             years: state.years,
             participants: state.participants,
             judgesByYear: state.judgesByYear,
             admins: state.admins,
-            scoringItems: state.scoringItems,
-            settings: state.settings
+            scores: state.scores,
+            // Consolidate all settings
+            settings: {
+                general: { competitionName: state.competitionName },
+                scoring: { items: state.scoringItems },
+                // scoringItems is kept for backward compatibility if needed, but we use settings.scoring primary
+                scoringItems: state.scoringItems
+            }
         };
         const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(exportObj, null, 2));
         const downloadAnchorNode = document.createElement('a');
@@ -367,11 +397,16 @@ const useStore = create((set, get) => ({
 
             // 1. Clear existing data if mode is 'replace'
             if (mode === 'replace') {
-                const collections = ['years', 'participants', 'judges', 'scores', 'admins', 'settings', 'scoringItems'];
+                // DO NOT delete 'settings' blindly, as it contains scoring/general config that might not be in JSON
+                const collections = ['years', 'participants', 'judges', 'scores', 'admins', 'scoringItems'];
                 for (const collName of collections) {
                     const snap = await getDocs(collection(db, collName));
                     snap.docs.forEach(doc => batch.delete(doc.ref));
                 }
+
+                // Explicitly handle settings docs if needed, or leave them to be overwritten
+                // If we want to ensure "clean slate" for settings, we should only delete if we have new data?
+                // For now, let's play safe: Don't delete settings unless overwritten.
             }
 
             // 2. Import Years & Categories
@@ -413,16 +448,48 @@ const useStore = create((set, get) => ({
                 });
             }
 
-            // 5. Import Scoring Items
-            if (data.scoringItems) {
-                data.scoringItems.forEach(item => {
-                    batch.set(doc(db, 'scoringItems', item.id), item);
-                });
+            // 5 & 6. Import Settings (General & Scoring)
+            if (data.settings) {
+                // If it's the new nested structure
+                if (data.settings.general) {
+                    batch.set(doc(db, 'settings', 'general'), data.settings.general);
+                }
+                if (data.settings.scoring) {
+                    batch.set(doc(db, 'settings', 'scoring'), data.settings.scoring);
+                }
+                // Handle competition settings
+                if (data.settings.competition) {
+                    batch.set(doc(db, 'settings', 'competition'), data.settings.competition);
+                } else if (!data.settings.general && !data.settings.scoring) {
+                    // Legacy structure where data.settings was the competition doc itself
+                    batch.set(doc(db, 'settings', 'competition'), data.settings);
+                }
+            } else if (data.scoringItems) {
+                // Backward compatibility for old JSON (v1.2 or earlier)
+                batch.set(doc(db, 'settings', 'scoring'), { items: data.scoringItems });
             }
 
-            // 6. Import Settings
-            if (data.settings) {
-                batch.set(doc(db, 'settings', 'competition'), data.settings);
+
+
+            // 7. Import Scores
+            if (data.scores) {
+                // scores map: { [catId]: { [pId]: { [email]: values } } }
+                Object.entries(data.scores).forEach(([catId, pMap]) => {
+                    Object.entries(pMap).forEach(([pId, judgeMap]) => {
+                        Object.entries(judgeMap).forEach(([email, values]) => {
+                            // Reconstruct ID: catId_pId_email
+                            const scoreId = `${catId}_${pId}_${email.toLowerCase()}`;
+                            const scoreData = {
+                                categoryId: catId,
+                                participantId: pId,
+                                judgeEmail: email.toLowerCase(),
+                                values: values,
+                                updatedAt: new Date().toISOString()
+                            };
+                            batch.set(doc(db, 'scores', scoreId), scoreData);
+                        });
+                    });
+                });
             }
 
             await batch.commit();
@@ -431,6 +498,75 @@ const useStore = create((set, get) => ({
             console.error("Import failed:", error);
             throw error;
         }
+    },
+
+    // Data Normalization Tool
+    normalizeDatabase: async () => {
+        const batch = writeBatch(db);
+        let updateCount = 0;
+
+        // 1. Normalize Judges
+        const judgesSnap = await getDocs(collection(db, 'judges'));
+        judgesSnap.docs.forEach(docSnap => {
+            const data = docSnap.data();
+            const lowerEmail = data.email.toLowerCase();
+            const correctId = `${data.yearId}_${lowerEmail}`;
+
+            if (docSnap.id !== correctId || data.email !== lowerEmail) {
+                batch.delete(docSnap.ref);
+                batch.set(doc(db, 'judges', correctId), {
+                    ...data,
+                    email: lowerEmail
+                });
+                updateCount++;
+            }
+        });
+
+        // 2. Normalize Admins
+        const adminsSnap = await getDocs(collection(db, 'admins'));
+        adminsSnap.docs.forEach(docSnap => {
+            const data = docSnap.data();
+            const lowerEmail = data.email.toLowerCase();
+
+            if (docSnap.id !== lowerEmail || data.email !== lowerEmail) {
+                batch.delete(docSnap.ref);
+                batch.set(doc(db, 'admins', lowerEmail), {
+                    ...data,
+                    email: lowerEmail
+                });
+                updateCount++;
+            }
+        });
+
+        // 3. Normalize Scores
+        const scoresSnap = await getDocs(collection(db, 'scores'));
+        scoresSnap.docs.forEach(docSnap => {
+            const data = docSnap.data();
+            const parts = docSnap.id.split('_');
+
+            if (parts.length >= 3) {
+                const catId = parts[0];
+                const pId = parts[1];
+                const emailPart = parts.slice(2).join('_');
+                const lowerEmail = emailPart.toLowerCase();
+                const correctId = `${catId}_${pId}_${lowerEmail}`;
+
+                // Check if ID is wrong OR internal field is wrong
+                if (docSnap.id !== correctId || data.judgeEmail !== lowerEmail) {
+                    batch.delete(docSnap.ref);
+                    batch.set(doc(db, 'scores', correctId), {
+                        ...data,
+                        judgeEmail: lowerEmail
+                    });
+                    updateCount++;
+                }
+            }
+        });
+
+        if (updateCount > 0) {
+            await batch.commit();
+        }
+        return updateCount;
     },
 
     clearAllData: async () => {
@@ -551,7 +687,7 @@ const useStore = create((set, get) => ({
 
                     const catId = parts[0];
                     const pId = parts[1];
-                    const jEmail = parts.slice(2).join('_'); // Handle emails with underscores if any
+                    const jEmail = parts.slice(2).join('_').toLowerCase();
 
                     if (!scoresMap[catId]) scoresMap[catId] = {};
                     if (!scoresMap[catId][pId]) scoresMap[catId][pId] = {};
@@ -634,8 +770,9 @@ const useStore = create((set, get) => ({
             const grouped = {};
             snapshot.docs.forEach(doc => {
                 const j = doc.data();
+                const normalizedJudge = { ...j, email: j.email.toLowerCase() };
                 if (!grouped[j.yearId]) grouped[j.yearId] = [];
-                grouped[j.yearId].push(j);
+                grouped[j.yearId].push(normalizedJudge);
             });
             set({ judgesByYear: grouped });
             get().syncUserRole();
@@ -693,7 +830,10 @@ const useStore = create((set, get) => ({
 
         // Sync Admins
         onSnapshot(collection(db, 'admins'), (snapshot) => {
-            const admins = snapshot.docs.map(doc => doc.data());
+            const admins = snapshot.docs.map(doc => {
+                const data = doc.data();
+                return { ...data, email: data.email.toLowerCase() };
+            });
             set({ admins });
             get().syncUserRole();
             checkAllSynced('admins');

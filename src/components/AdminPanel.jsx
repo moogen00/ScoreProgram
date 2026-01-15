@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Plus, Trash2, ArrowUp, ArrowDown, Settings, List, Shield, Trophy, Layout, Users, UserPlus, Hash, User as UserIcon, SortAsc, Lock, Unlock, PenTool, FileUp, FileDown, Database, AlertTriangle, Check, LogOut, QrCode, X } from 'lucide-react';
+import { Plus, Trash2, ArrowUp, ArrowDown, Settings, List, Shield, Trophy, Layout, Users, UserPlus, Hash, User as UserIcon, SortAsc, Lock, Unlock, PenTool, FileUp, FileDown, Database, AlertTriangle, Check, LogOut, QrCode, X, RefreshCcw } from 'lucide-react';
 import QRCode from "react-qr-code";
 import useStore from '../store/useStore';
 import { clsx } from 'clsx';
@@ -14,7 +14,7 @@ const AdminPanel = () => {
         scoringItems, addScoringItem, removeScoringItem, updateScoringItemOrder,
         judgesByYear, addJudge, removeJudge,
         participants, addParticipant, removeParticipant, updateParticipant, moveParticipants,
-        selectedCategoryId, years,
+        selectedCategoryId, years, scores,
         addCategory, updateCategory, deleteCategory, moveCategory, sortCategoriesByName, toggleYearLock,
         admins, addAdmin, removeAdmin, competitionName, setCompetitionName,
         seedRandomScores, clearYearScores,
@@ -128,8 +128,47 @@ const AdminPanel = () => {
     };
 
     const currentCategoryParticipants = participants[selectedCategoryId] || [];
+    const categoryScores = scores[selectedCategoryId] || {};
 
-    const getYearParticipants = () => {
+    const getScoredParticipants = useCallback((ps, catScores) => {
+        if (!ps || ps.length === 0) return [];
+
+        const scored = ps.map(p => {
+            const pScores = catScores[p.id] || {};
+            const judgeEmails = Object.keys(pScores);
+            const judgeCount = judgeEmails.length;
+
+            const totalSum = judgeEmails.reduce((sum, email) => {
+                const itemScores = pScores[email] || {};
+                const judgeSum = Object.values(itemScores).reduce((a, b) => a + b, 0);
+                return sum + judgeSum;
+            }, 0);
+
+            const average = judgeCount > 0 ? totalSum / judgeCount : 0;
+            return { ...p, totalSum, average, judgeCount };
+        }).sort((a, b) => b.average - a.average);
+
+        // Standard Competition Ranking O(N log N)
+        const rankMap = new Map();
+        let currentRank = 1;
+        scored.forEach((p, idx) => {
+            if (idx > 0 && p.average < scored[idx - 1].average) {
+                currentRank = idx + 1;
+            }
+            rankMap.set(p.id, p.average > 0 ? currentRank : '-');
+        });
+
+        return scored.map(s => ({
+            ...s,
+            rank: rankMap.get(s.id)
+        }));
+    }, []);
+
+    const rankedCategoryParticipants = useMemo(() =>
+        getScoredParticipants(currentCategoryParticipants, categoryScores)
+        , [currentCategoryParticipants, categoryScores, getScoredParticipants]);
+
+    const getYearParticipants = useCallback(() => {
         if (!manageYearId) return [];
         const year = years.find(y => y.id === manageYearId);
         if (!year) return [];
@@ -137,21 +176,40 @@ const AdminPanel = () => {
         const all = [];
         (year.categories || []).forEach(cat => {
             const catPs = participants[cat.id] || [];
-            const sortedCatPs = [...catPs].sort((a, b) =>
+            const catScores = scores[cat.id] || {};
+            const rankedPs = getScoredParticipants(catPs, catScores);
+
+            const sortedRankedPs = rankedPs.sort((a, b) =>
                 a.number.localeCompare(b.number, undefined, { numeric: true })
             );
-            sortedCatPs.forEach(p => {
+
+            sortedRankedPs.forEach(p => {
                 all.push({ ...p, categoryName: cat.name, categoryId: cat.id });
             });
         });
 
         if (sortConfig.field === 'no' && sortConfig.direction === 'desc') {
-            return all.reverse();
+            all.reverse();
         }
 
-        return all;
-    };
-    const yearAllParticipants = getYearParticipants();
+        // Calculate Year-wide Overall Rank O(N log N)
+        const sortedByAvg = [...all].sort((a, b) => b.average - a.average);
+        const yearRankMap = new Map();
+        let currentRank = 1;
+        sortedByAvg.forEach((p, idx) => {
+            if (idx > 0 && p.average < sortedByAvg[idx - 1].average) {
+                currentRank = idx + 1;
+            }
+            yearRankMap.set(`${p.categoryId}_${p.id}`, p.average > 0 ? currentRank : '-');
+        });
+
+        return all.map(p => ({
+            ...p,
+            yearRank: yearRankMap.get(`${p.categoryId}_${p.id}`)
+        }));
+    }, [manageYearId, years, participants, scores, sortConfig, getScoredParticipants]);
+
+    const yearAllParticipants = useMemo(() => getYearParticipants(), [getYearParticipants]);
 
     const handleSort = () => {
         setSortConfig(prev => ({
@@ -203,7 +261,7 @@ const AdminPanel = () => {
                         { id: 'scoring', label: '채점 항목', icon: List },
                         { id: 'participants', label: '참가자 관리', icon: Users },
                         { id: 'judges', label: '심사위원 관리', icon: Shield },
-                        { id: 'settings', label: '대회 설정', icon: Settings },
+
                         { id: 'data', label: '데이터 관리', icon: Database },
                         ...(currentUser?.role === 'ROOT_ADMIN' ? [{ id: 'admins', label: '관리자(Root)', icon: Lock }] : [])
                     ].map(tab => (
@@ -289,7 +347,7 @@ const AdminPanel = () => {
                                 <button type="submit" className="bg-emerald-600 hover:bg-emerald-500 text-white py-3 rounded-xl font-bold flex items-center justify-center gap-2 transition-all hover:scale-[1.02]"><UserPlus size={20} /> 참가자 등록</button>
                             </form>
                             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-                                {(participants[manageCatId] || []).sort((a, b) => a.number.localeCompare(b.number, undefined, { numeric: true })).map(p => (
+                                {rankedCategoryParticipants.sort((a, b) => a.number.localeCompare(b.number, undefined, { numeric: true })).map(p => (
                                     <div key={p.id} className="p-4 bg-white/5 border border-white/10 rounded-xl flex items-center justify-between group">
                                         {editingPId === p.id ? (
                                             <div className="flex flex-col gap-2 w-full">
@@ -304,7 +362,15 @@ const AdminPanel = () => {
                                             <>
                                                 <div className="flex items-center gap-3">
                                                     <div className="w-10 h-10 rounded-lg bg-emerald-500/20 text-emerald-400 flex items-center justify-center font-black">{p.number}</div>
-                                                    <span className="font-bold text-white">{p.name}</span>
+                                                    <div>
+                                                        <span className="font-bold text-white block">{p.name}</span>
+                                                        <div className="flex items-center gap-2 mt-0.5">
+                                                            <span className="text-[10px] font-black uppercase text-slate-500">Rank</span>
+                                                            <span className="text-[10px] font-black text-indigo-400">{p.rank}</span>
+                                                            <span className="text-[10px] font-black uppercase text-slate-500 ml-1">Avg</span>
+                                                            <span className="text-[10px] font-black text-emerald-400">{p.average?.toFixed(1) || '0.0'}</span>
+                                                        </div>
+                                                    </div>
                                                 </div>
                                                 <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-all">
                                                     <button onClick={() => { setEditingPId(p.id); setEditPNumber(p.number); setEditPName(p.name); }} className="p-2 hover:bg-white/10 rounded-lg text-slate-400"><Settings size={14} /></button>
@@ -338,6 +404,10 @@ const AdminPanel = () => {
                                             <th className="px-6 py-5 w-40">참가번호</th>
                                             <th className="px-6 py-5">참가팀</th>
                                             <th className="px-6 py-5">종목</th>
+                                            <th className="px-6 py-5 w-24 text-center text-emerald-400 font-black">Avg</th>
+                                            <th className="px-6 py-5 w-24 text-center">Sum</th>
+                                            <th className="px-6 py-5 w-20 text-center text-indigo-400 font-black">Year Rank</th>
+                                            <th className="px-6 py-5 w-20 text-center line-clamp-1">Cat Rank</th>
                                             <th className="px-6 py-5 w-24 text-center">관리</th>
                                         </tr>
                                     </thead>
@@ -389,6 +459,24 @@ const AdminPanel = () => {
                                                         <td className="px-6 py-5 font-mono font-bold text-lg text-white">{p.number}</td>
                                                         <td className="px-6 py-5 font-bold text-lg text-white">{p.name}</td>
                                                         <td className="px-6 py-5"><span className="text-xs bg-white/5 px-3 py-1.5 rounded-lg text-slate-300 font-bold uppercase tracking-tight">{p.categoryName}</span></td>
+                                                        <td className="px-6 py-5 text-center font-mono font-black text-emerald-400">{p.average?.toFixed(1) || '0.0'}</td>
+                                                        <td className="px-6 py-5 text-center font-mono text-xs text-slate-500">{p.totalSum?.toFixed(1) || '0.0'}</td>
+                                                        <td className="px-6 py-5 text-center">
+                                                            <span className="px-2 py-1 rounded text-[10px] font-black bg-indigo-500 text-white">
+                                                                {p.yearRank}
+                                                            </span>
+                                                        </td>
+                                                        <td className="px-6 py-5 text-center">
+                                                            <span className={cn(
+                                                                "px-2 py-1 rounded text-[10px] font-black",
+                                                                p.rank === 1 ? "bg-amber-500 text-black" :
+                                                                    p.rank === 2 ? "bg-slate-400 text-black" :
+                                                                        p.rank === 3 ? "bg-orange-700 text-white" :
+                                                                            "bg-white/10 text-slate-400"
+                                                            )}>
+                                                                {p.rank}
+                                                            </span>
+                                                        </td>
                                                         <td className="px-6 py-5 text-center">
                                                             <div className="flex items-center justify-center gap-2 opacity-0 group-hover:opacity-100 transition-all">
                                                                 <button onClick={() => { setEditingPId(p.id); setEditPNumber(p.number); setEditPName(p.name); }} className="p-2 hover:bg-white/10 rounded-lg text-slate-400"><Settings size={16} /></button>
@@ -503,58 +591,7 @@ const AdminPanel = () => {
                 </div>
             )}
 
-            {adminTab === 'settings' && (
-                <div className="space-y-6">
-                    <div className="glass-card p-8 animate-in fade-in slide-in-from-bottom-2 duration-500">
-                        <div className="flex items-center gap-2 mb-6">
-                            <Trophy className="text-indigo-400" />
-                            <h2 className="text-xl font-bold text-white">대회 정보 설정</h2>
-                        </div>
-                        <div className="space-y-4">
-                            <div>
-                                <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest block mb-2 px-1">대회 공식 명칭</label>
-                                <input type="text" value={competitionName} onChange={(e) => setCompetitionName(e.target.value)} className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-white outline-none" />
-                            </div>
-                        </div>
-                    </div>
 
-                    {import.meta.env.DEV && (
-                        <div className="glass-card p-8 animate-in fade-in slide-in-from-bottom-2 duration-500 bg-amber-500/5 border-amber-500/20">
-                            <div className="flex items-center gap-2 mb-6">
-                                <PenTool className="text-amber-400" />
-                                <h2 className="text-xl font-bold text-white">테스트 데이터 도구 (Developer)</h2>
-                            </div>
-                            <div className="space-y-4">
-                                <p className="text-xs text-slate-400">2025년 종목들에 대해 가상의 심사위원 3명의 점수를 자동으로 생성하거나 초기화합니다.</p>
-                                <div className="flex gap-4">
-                                    <button
-                                        onClick={async () => {
-                                            if (confirm('2025년 모든 종목에 랜덤 점수를 생성하시겠습니까? (수 초 소요될 수 있습니다)')) {
-                                                await seedRandomScores('2025');
-                                                alert('2025년 데이터 생성이 완료되었습니다.');
-                                            }
-                                        }}
-                                        className="bg-amber-600 hover:bg-amber-500 text-white px-6 py-3 rounded-xl font-bold transition-all"
-                                    >
-                                        2025년 랜덤 데이터 채우기
-                                    </button>
-                                    <button
-                                        onClick={async () => {
-                                            if (confirm('2025년의 모든 점수 데이터를 삭제하시겠습니까?')) {
-                                                await clearYearScores('2025');
-                                                alert('2025년 데이터가 초기화되었습니다.');
-                                            }
-                                        }}
-                                        className="bg-white/5 border border-white/10 hover:bg-rose-500/20 hover:border-rose-500/50 text-slate-400 hover:text-rose-400 px-6 py-3 rounded-xl font-bold transition-all"
-                                    >
-                                        2025년 점수 초기화
-                                    </button>
-                                </div>
-                            </div>
-                        </div>
-                    )}
-                </div>
-            )}
 
             {adminTab === 'data' && (
                 <div className="space-y-6">
@@ -646,6 +683,33 @@ const AdminPanel = () => {
                                     JSON 파일 업로드
                                 </button>
                             </div>
+                        </div>
+
+                        {/* Data Integrity Tools */}
+                        <div className="mt-8 p-6 bg-amber-500/5 border border-amber-500/20 rounded-2xl">
+                            <div className="flex items-center gap-2 mb-4">
+                                <RefreshCcw className="text-amber-400" />
+                                <h3 className="text-lg font-bold text-white">데이터 정합성 도구 (Data Repair)</h3>
+                            </div>
+                            <p className="text-xs text-slate-400 mb-6 leading-relaxed">
+                                기존 데이터의 이메일 대소문자 문제로 인해 심사위원이 본인의 점수를 볼 수 없는 경우 사용하세요.
+                                모든 데이터(심사위원, 관리자, 점수)의 이메일 키를 소문자로 변환하여 저장합니다.
+                            </p>
+                            <button
+                                onClick={async () => {
+                                    if (confirm('모든 데이터의 이메일 키를 소문자로 변환하시겠습니까? (이 작업은 되돌릴 수 없습니다)')) {
+                                        try {
+                                            const count = await useStore.getState().normalizeDatabase();
+                                            alert(`작업 완료: ${count}개의 데이터가 수정되었습니다.`);
+                                        } catch (e) {
+                                            alert(`오류 발생: ${e.message}`);
+                                        }
+                                    }
+                                }}
+                                className="w-full py-4 bg-amber-600 hover:bg-amber-500 text-white rounded-xl font-bold flex items-center justify-center gap-2 transition-all"
+                            >
+                                <RefreshCcw size={20} /> 데이터 대소문자 변환 (Case Normalization)
+                            </button>
                         </div>
 
                         {/* Danger Zone - Dev Only */}

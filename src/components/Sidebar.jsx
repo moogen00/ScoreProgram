@@ -11,7 +11,7 @@ function cn(...inputs) {
 
 const Sidebar = ({ width, isOpen, onClose, onRequestLogout }) => {
     const {
-        years,
+        years: allYears, // Rename to allYears to avoid conflict with visibleYears logic
         selectedCategoryId,
         setSelectedCategoryId,
         activeView,
@@ -208,7 +208,24 @@ const Sidebar = ({ width, isOpen, onClose, onRequestLogout }) => {
         );
     };
 
+
+
+    // Filter years for Judges
     const userRole = currentUser?.role || 'USER';
+
+    const visibleYears = React.useMemo(() => {
+        if (!currentUser) return [];
+        // ROOT_ADMIN, ADMIN, SPECTATOR -> See all
+        if (['ROOT_ADMIN', 'ADMIN', 'SPECTATOR'].includes(userRole)) {
+            return allYears;
+        }
+        // JUDGE -> See only assigned years
+        if (userRole === 'JUDGE') {
+            const assigned = currentUser.assignedYears || [];
+            return allYears.filter(y => assigned.includes(y.id));
+        }
+        return [];
+    }, [allYears, currentUser, userRole]);
 
     return (
         <aside
@@ -321,7 +338,7 @@ const Sidebar = ({ width, isOpen, onClose, onRequestLogout }) => {
                     </motion.div>
                 )}
 
-                {years.map((year) => (
+                {visibleYears.map((year) => (
                     <div key={year.id} className="space-y-1">
                         <div className="group flex items-center">
                             {editingYearId === year.id ? (

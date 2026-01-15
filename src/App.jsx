@@ -94,8 +94,51 @@ function App() {
         return () => window.removeEventListener('popstate', handlePopState);
     }, [initSync, currentUser]);
 
+    const [isVerifying, setIsVerifying] = React.useState(false);
+
+    // Initial Role Verification
+    React.useEffect(() => {
+        if (currentUser) {
+            // If user has just logged in, we need to wait for role sync
+            // Logic: syncUserRole runs on snapshot. We can check if role is determined.
+            // But syncUserRole might take a moment. 
+            // Better: useStore has `isDataLoaded`? No.
+            // We can just set a small timeout or check immediately if assumes data flows quickly.
+            // Actually, if we just rely on the fact that initSync starts listeners.
+
+            // Let's verify after a short delay to allow snapshots to process
+            setIsVerifying(true);
+            const timer = setTimeout(() => {
+                const state = useStore.getState();
+                const freshUser = state.currentUser;
+
+                // Root Admin check from env
+                const rootAdmins = (import.meta.env.VITE_ROOT_ADMIN_EMAILS || '').split(',').map(e => e.trim());
+                const isRoot = rootAdmins.includes(freshUser.email);
+
+                if (freshUser && freshUser.role === 'USER' && !isRoot) {
+                    alert('등록되지 않은 사용자입니다. (Unregistered User)\n\n관리자나 심사위원으로 등록된 계정만 이용할 수 있습니다.');
+                    logout();
+                }
+                setIsVerifying(false);
+            }, 2000); // 2 seconds verification window
+
+            return () => clearTimeout(timer);
+        }
+    }, [currentUser, logout]);
+
     if (!currentUser) {
         return <LoginPage />;
+    }
+
+    if (isVerifying) {
+        return (
+            <div className="min-h-screen bg-slate-950 flex flex-col items-center justify-center text-white">
+                <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-indigo-500 mb-4"></div>
+                <h2 className="text-xl font-bold">사용자 권한 확인 중...</h2>
+                <p className="text-slate-400 text-sm mt-2">잠시만 기다려주세요 (Verifying Access...)</p>
+            </div>
+        );
     }
 
     return (

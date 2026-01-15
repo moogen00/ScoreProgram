@@ -32,19 +32,42 @@ const Leaderboard = () => {
     const sortedJudges = Object.entries(judgeMap).sort((a, b) => a[1].localeCompare(b[1]));
 
     // Calculate rankings
-    const leaderboardData = categoryParticipants.map(p => {
-        const pScores = categoryScores[p.id] || {};
-        let total = 0;
-        const judgeBreakdown = {};
+    const leaderboardData = useMemo(() => {
+        const scored = categoryParticipants.map(p => {
+            const pScores = categoryScores[p.id] || {};
+            let totalSum = 0;
+            const judgeBreakdown = {};
+            const judgeEmails = Object.keys(pScores);
+            const judgeCount = judgeEmails.length;
 
-        Object.entries(pScores).forEach(([jEmail, itemScores]) => {
-            const jTotal = Object.values(itemScores).reduce((a, b) => a + b, 0);
-            judgeBreakdown[judgeMap[jEmail]] = jTotal;
-            total += jTotal;
+            judgeEmails.forEach(jEmail => {
+                const itemScores = pScores[jEmail] || {};
+                const jTotal = Object.values(itemScores).reduce((a, b) => a + b, 0);
+                judgeBreakdown[judgeMap[jEmail]] = jTotal;
+                totalSum += jTotal;
+            });
+
+            const average = judgeCount > 0 ? totalSum / judgeCount : 0;
+            return { ...p, totalSum, average, judgeCount, judgeBreakdown, pScores };
+        }).sort((a, b) => b.average - a.average);
+
+        // Standard Competition Ranking O(N log N)
+        const rankMap = new Map();
+        let currentRank = 1;
+        scored.forEach((d, idx) => {
+            if (idx > 0 && d.average < scored[idx - 1].average) {
+                currentRank = idx + 1;
+            }
+            rankMap.set(d.id, d.average > 0 ? currentRank : '-');
         });
 
-        return { ...p, total, judgeBreakdown, pScores };
-    }).sort((a, b) => b.total - a.total);
+        return scored.map(d => ({
+            ...d,
+            rank: rankMap.get(d.id)
+        }));
+    }, [categoryParticipants, categoryScores, judgeMap]);
+
+    const finalLeaderboard = leaderboardData;
 
     return (
         <div className="max-w-6xl mx-auto pb-12">
@@ -74,11 +97,11 @@ const Leaderboard = () => {
                                         </div>
                                     </th>
                                 ))}
-                                <th className="px-8 py-6 text-right border-l border-white/10 bg-indigo-500/5 text-indigo-300">Total Sum</th>
+                                <th className="px-8 py-6 text-right border-l border-white/10 bg-indigo-500/5 text-emerald-400 font-black">Average Score</th>
                             </tr>
                         </thead>
                         <tbody className="divide-y divide-white/5 font-medium">
-                            {leaderboardData.map((data, index) => (
+                            {finalLeaderboard.map((data, index) => (
                                 <React.Fragment key={data.id}>
                                     <tr
                                         className={cn(
@@ -88,14 +111,14 @@ const Leaderboard = () => {
                                         onClick={() => isAdmin && setExpandedPId(expandedPId === data.id ? null : data.id)}
                                     >
                                         <td className="px-8 py-6">
-                                            {index === 0 ? (
+                                            {data.rank === 1 ? (
                                                 <div className="w-10 h-10 rounded-xl bg-amber-500/20 border border-amber-500/40 flex items-center justify-center text-amber-500 font-black italic shadow-lg shadow-amber-500/10">1st</div>
-                                            ) : index === 1 ? (
+                                            ) : data.rank === 2 ? (
                                                 <div className="w-10 h-10 rounded-xl bg-slate-400/20 border border-slate-400/40 flex items-center justify-center text-slate-400 font-black italic">2nd</div>
-                                            ) : index === 2 ? (
+                                            ) : data.rank === 3 ? (
                                                 <div className="w-10 h-10 rounded-xl bg-orange-700/20 border border-orange-700/40 flex items-center justify-center text-orange-700 font-black italic">3rd</div>
                                             ) : (
-                                                <span className="text-slate-600 pl-4">{index + 1}</span>
+                                                <span className="text-slate-600 pl-4">{data.rank}</span>
                                             )}
                                         </td>
                                         <td className="px-6 py-6">
@@ -113,9 +136,12 @@ const Leaderboard = () => {
                                         ))}
                                         <td className="px-8 py-6 text-right border-l border-white/10 bg-indigo-500/5">
                                             <div className="flex items-center justify-end gap-3">
-                                                <span className="text-3xl font-black text-white tabular-nums">
-                                                    {data.total.toFixed(1)}
-                                                </span>
+                                                <div className="flex flex-col items-end">
+                                                    <span className="text-3xl font-black text-white tabular-nums">
+                                                        {data.average.toFixed(1)}
+                                                    </span>
+                                                    <span className="text-[10px] text-slate-500 font-mono">Sum: {data.totalSum.toFixed(1)}</span>
+                                                </div>
                                                 {isAdmin && (
                                                     <button
                                                         onClick={(e) => {

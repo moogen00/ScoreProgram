@@ -9,7 +9,8 @@ const DebugPanel = () => {
     const [isOpen, setIsOpen] = useState(false);
     const [isFixing, setIsFixing] = useState(false);
 
-    if (process.env.NODE_ENV === 'production' && !state.currentUser?.role?.includes('ADMIN')) return null;
+    // Strictly hide in production, regardless of role
+    if (!import.meta.env.DEV) return null;
 
     const collections = [
         { name: 'Years', count: state.years.length },
