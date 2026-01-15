@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
-import { Plus, Trash2, ArrowUp, ArrowDown, Settings, List, Shield, Trophy, Layout, Users, UserPlus, Hash, User as UserIcon, SortAsc, Lock, Unlock, PenTool, FileUp, FileDown, Database, AlertTriangle, Check, LogOut } from 'lucide-react';
+import { Plus, Trash2, ArrowUp, ArrowDown, Settings, List, Shield, Trophy, Layout, Users, UserPlus, Hash, User as UserIcon, SortAsc, Lock, Unlock, PenTool, FileUp, FileDown, Database, AlertTriangle, Check, LogOut, QrCode, X } from 'lucide-react';
+import QRCode from "react-qr-code";
 import useStore from '../store/useStore';
 import { clsx } from 'clsx';
 import { twMerge } from 'tailwind-merge';
@@ -51,6 +52,11 @@ const AdminPanel = () => {
     // Import states
     const [importMode, setImportMode] = useState('merge'); // 'merge' or 'replace'
     const [isImporting, setIsImporting] = useState(false);
+
+    // QR Modal state
+    const [showQrModal, setShowQrModal] = useState(false);
+    const PRODUCTION_URL = "https://scoreprogram-f8fbb.web.app";
+
 
     // Find info for current category
     const findCatInfo = () => {
@@ -184,6 +190,13 @@ const AdminPanel = () => {
                 <div className="flex items-center gap-3">
                     <Settings className="text-rose-400 w-8 h-8" />
                     <h1 className="text-3xl font-bold">Admin Workspace</h1>
+                    <button
+                        onClick={() => setShowQrModal(true)}
+                        className="ml-4 px-3 py-1.5 bg-indigo-600/30 hover:bg-indigo-600/50 text-indigo-200 rounded-lg text-xs font-bold flex items-center gap-2 transition-all border border-indigo-500/30"
+                    >
+                        <QrCode size={14} />
+                        QR Connect
+                    </button>
                 </div>
                 <div className="flex bg-black/40 p-1 rounded-xl border border-white/10 shadow-inner overflow-x-auto">
                     {[
@@ -688,8 +701,52 @@ const AdminPanel = () => {
                         ))}
                     </div>
                 </div>
+
             )}
-        </div>
+
+            {/* QR Code Modal */}
+            {
+                showQrModal && (
+                    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-200">
+                        <div className="bg-[#1e1e1e] border border-white/10 rounded-3xl p-8 max-w-md w-full relative shadow-2xl scale-100 animate-in zoom-in-95 duration-200">
+                            <button
+                                onClick={() => setShowQrModal(false)}
+                                className="absolute top-4 right-4 p-2 bg-white/5 hover:bg-white/10 rounded-full text-slate-400 hover:text-white transition-all"
+                            >
+                                <X size={20} />
+                            </button>
+
+                            <div className="text-center space-y-6">
+                                <div>
+                                    <h2 className="text-2xl font-black text-white mb-2">Connect to Competition</h2>
+                                    <p className="text-slate-400 text-sm">Scan with your camera to access</p>
+                                </div>
+
+                                <div className="bg-white p-4 rounded-2xl inline-block shadow-[0_0_40px_-10px_rgba(99,102,241,0.5)]">
+                                    <QRCode
+                                        value={PRODUCTION_URL}
+                                        size={200}
+                                        level="H"
+                                    />
+                                </div>
+
+                                <div className="bg-indigo-500/10 border border-indigo-500/20 rounded-xl p-4">
+                                    <p className="text-[10px] text-indigo-300 font-bold uppercase tracking-widest mb-1">Production URL</p>
+                                    <p className="text-white font-mono text-sm break-all font-bold">{PRODUCTION_URL}</p>
+                                </div>
+
+                                {import.meta.env.DEV && (
+                                    <div className="bg-amber-500/5 border border-amber-500/10 rounded-xl p-3">
+                                        <p className="text-[10px] text-amber-500/70 font-bold uppercase tracking-widest mb-1">Local Network URL (Dev)</p>
+                                        <p className="text-slate-400 font-mono text-xs">{window.location.href}</p>
+                                    </div>
+                                )}
+                            </div>
+                        </div>
+                    </div>
+                )
+            }
+        </div >
     );
 };
 
