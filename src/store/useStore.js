@@ -45,7 +45,9 @@ const useStore = create((set, get) => ({
             email: userData.email.toLowerCase(),
             role
         };
+        const userToStore = { ...normalizedData, lastLoginAt: Date.now() };
         set({ currentUser: normalizedData });
+        localStorage.setItem('score_program_user', JSON.stringify(userToStore));
         get().syncUserRole();
 
         // Force refresh scores to ensure we get data if rules were restrictive before login
@@ -53,6 +55,7 @@ const useStore = create((set, get) => ({
     },
     logout: () => {
         set({ currentUser: null });
+        localStorage.removeItem('score_program_user');
         // Optional: clear scores or unsubscribe
         const { unsubScores } = get();
         if (unsubScores) unsubScores();
@@ -714,6 +717,28 @@ const useStore = create((set, get) => ({
         const { refreshScores, isSyncInitialized } = get();
         if (isSyncInitialized) return;
         set({ isSyncInitialized: true });
+
+        // Restore session from localStorage
+        const savedUser = localStorage.getItem('score_program_user');
+        if (savedUser) {
+            try {
+                const userData = JSON.parse(savedUser);
+                const TWELVE_HOURS = 12 * 60 * 60 * 1000;
+
+                if (Date.now() - userData.lastLoginAt < TWELVE_HOURS) {
+                    set({ currentUser: userData });
+                    console.log(`[Auth] Session restored for ${userData.email}`);
+                    // refreshScores will be called by login() usually, but here we do it manually after restoration
+                    get().refreshScores();
+                } else {
+                    console.log('[Auth] Session expired');
+                    localStorage.removeItem('score_program_user');
+                }
+            } catch (e) {
+                console.error('[Auth] Failed to restore session', e);
+                localStorage.removeItem('score_program_user');
+            }
+        }
 
         // Sync General Settings
         onSnapshot(doc(db, 'settings', 'general'), (docSnap) => {

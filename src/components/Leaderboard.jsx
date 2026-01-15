@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 import { TrendingUp, User as UserIcon, Trophy, Award, ChevronDown, ChevronUp } from 'lucide-react';
 import useStore from '../store/useStore';
 import { motion, AnimatePresence } from 'framer-motion';
