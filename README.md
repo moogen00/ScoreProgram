@@ -99,3 +99,48 @@ A. 터미널에서 `npx firebase-tools login --reauth` 명령어로 다시 로�
 
 **Q. 모바일에서 접속이 안 돼요.**
 A. PC와 모바일이 **같은/동일한 와이파이**에 연결되어 있는지 확인하세요. Windows 방화벽 설정을 확인해야 할 수도 있습니다.
+
+---
+
+## 🤝 협업 및 멀티 디바이스 개발 가이드 (Collaboration)
+
+Windwosx PC와 Mac 등 여러 기기에서 동시에 개발할 때의 워크플로우입니다.
+
+### 1단계: 기존 PC (업로드)
+작업이 끝나면 반드시 GitHub에 코드를 올려주세요.
+```bash
+git add .
+git commit -m "작업 내용 요약"
+git push
+```
+> **주의**: `.env` 파일은 보안상 GitHub에 올라가지 않습니다. 카카오톡이나 메일로 따로 공유해야 합니다.
+
+### 2단계: 새 PC (다운로드 및 설정)
+새로운 컴퓨터(Mac 등)에서 처음 시작할 때:
+```bash
+# 1. 프로젝트 복제
+git clone git@github.com:moogen00/ScoreProgram.git
+cd ScoreProgram
+
+# 2. 라이브러리 설치
+npm install
+
+# 3. 환경 변수 설정
+# .env 파일을 생성하고 기존 PC에서 쓰던 내용을 복사하여 붙여넣으세요.
+```
+
+### 3단계: 작업 루틴 (Sync Routine)
+여러 대를 오가며 작업할 때 충돌을 방지하기 위해 이 순서를 꼭 지켜주세요.
+
+1.  **시작할 때 (Pull)**: "무조건 최신 코드 받기"
+    ```bash
+    git pull
+    ```
+2.  **작업 수행**: 코드 수정 및 기능 개발
+3.  **끝낼 때 (Push)**: "서버에 저장하기"
+    ```bash
+    git add .
+    git commit -m "작업 완료"
+    git push
+    ```
+
