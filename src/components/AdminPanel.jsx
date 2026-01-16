@@ -824,7 +824,11 @@ const AdminPanel = () => {
                                         <div className="w-10 h-10 rounded-xl bg-rose-500/20 text-rose-400 flex items-center justify-center"><Shield size={20} /></div>
                                         <div><p className="font-bold text-white">{admin.name}</p><p className="text-xs text-slate-500">{admin.email}</p></div>
                                     </div>
-                                    <button onClick={() => removeAdmin(admin.email)} className="p-2 opacity-0 group-hover:opacity-100 hover:bg-rose-500/20 rounded-lg text-rose-400 transition-all"><Trash2 size={18} /></button>
+                                    <button onClick={() => {
+                                        if (confirm(`${admin.name} 관리자를 정말 삭제하시겠습니까?`)) {
+                                            removeAdmin(admin.email);
+                                        }
+                                    }} className="p-2 opacity-0 group-hover:opacity-100 hover:bg-rose-500/20 rounded-lg text-rose-400 transition-all"><Trash2 size={18} /></button>
                                 </div>
                             ))}
                         </div>
