@@ -20,7 +20,8 @@ const AdminPanel = () => {
         seedRandomScores, clearYearScores,
         exportData, importData, clearAllData,
         currentUser,
-        adminTab, setAdminTab
+        adminTab, setAdminTab,
+        isResetting, resetStatus, isExporting
     } = useStore();
 
     // Form states
@@ -84,30 +85,39 @@ const AdminPanel = () => {
 
     const handleAddParticipant = (e) => {
         e.preventDefault();
-        if (manageCatId && newPNumber.trim() && newPName.trim()) {
+        const number = newPNumber.trim();
+        const name = newPName.trim();
+
+        if (manageCatId && name) {
             const currentList = participants[manageCatId] || [];
-            if (currentList.some(p => p.number === newPNumber.trim())) {
+            // Only check duplicate if number is provided
+            if (number && currentList.some(p => p.number === number)) {
                 alert('이미 등록된 참가번호입니다. (Duplicate Number)');
                 return;
             }
-            addParticipant(manageCatId, newPNumber.trim(), newPName.trim());
+            addParticipant(manageCatId, number, name);
             setNewPNumber('');
             setNewPName('');
         }
     };
 
     const validateAndUpdateParticipant = (categoryId, pId, newNumber, newName) => {
-        if (!newNumber.trim() || !newName.trim()) return;
+        const number = newNumber.trim();
+        const name = newName.trim();
+
+        if (!name) return;
 
         const currentList = participants[categoryId] || [];
-        const isDuplicate = currentList.some(p => p.number === newNumber.trim() && p.id !== pId);
+        // Only check duplicate if number is provided and different from current (though current check handles pId check)
+        // If number is empty, we allow it even if others are empty (or maybe we don't care about duplicate empty numbers)
+        const isDuplicate = number && currentList.some(p => p.number === number && p.id !== pId);
 
         if (isDuplicate) {
             alert('이미 등록된 참가번호입니다. (Duplicate Number)');
             return;
         }
 
-        updateParticipant(categoryId, pId, { number: newNumber.trim(), name: newName.trim() });
+        updateParticipant(categoryId, pId, { number, name });
         setEditingPId(null);
     };
 
@@ -559,17 +569,19 @@ const AdminPanel = () => {
                                     <FileDown className="text-indigo-400 mb-4" size={32} />
                                     <h3 className="text-lg font-bold text-white mb-2">DB 데이터 내보내기</h3>
                                     <p className="text-xs text-slate-400 mb-6 leading-relaxed">
-                                        현재 연도, 종목, 참가자, 심사위원 정보를 포함한 전체 DB 정보를 JSON 파일로 내려받습니다.
+                                        `score_program_backup_${new Date().toISOString().split('T')[0]}.json` 파일로 저장됩니다.
                                     </p>
                                     <button
                                         onClick={exportData}
-                                        className="w-full py-4 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl font-bold flex items-center justify-center gap-2 transition-all"
+                                        disabled={isExporting}
+                                        className="w-full py-4 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white rounded-xl font-bold flex items-center justify-center gap-2 transition-all"
                                     >
-                                        <FileDown size={20} /> JSON 파일 다운로드
+                                        {isExporting ? <span className="animate-spin text-xl">⏳</span> : <FileDown size={20} />}
+                                        {isExporting ? '데이터 준비 중...' : 'JSON 데이터 내보내기'}
                                     </button>
                                 </div>
 
-                                <div className="p-6 bg-white/5 border border-white/10 rounded-2xl">
+                                <div className="p-6 bg-emerald-500/5 border border-emerald-500/20 rounded-2xl">
                                     <FileUp className="text-emerald-400 mb-4" size={32} />
                                     <h3 className="text-lg font-bold text-white mb-2">DB 데이터 가져오기</h3>
                                     <div className="flex gap-4 mb-4">
@@ -672,9 +684,17 @@ const AdminPanel = () => {
                                         <p className="text-xs text-slate-400">모든 연도, 종목, 참가자, 점수 등 데이터베이스의 **모든 정보를 영구적으로 삭제**합니다.</p>
                                         <button
                                             onClick={clearAllData}
-                                            className="px-6 py-3 bg-white/5 border border-rose-500/30 text-rose-400 hover:bg-rose-500 hover:text-white rounded-xl text-xs font-bold transition-all whitespace-nowrap"
+                                            disabled={isResetting}
+                                            className="px-6 py-3 bg-white/5 border border-rose-500/30 text-rose-400 hover:bg-rose-500 hover:text-white rounded-xl text-xs font-bold transition-all whitespace-nowrap flex items-center gap-2"
                                         >
-                                            데이터베이스 완전 초기화
+                                            {isResetting ? (
+                                                <>
+                                                    <RefreshCcw size={14} className="animate-spin" />
+                                                    {resetStatus || '초기화 중...'}
+                                                </>
+                                            ) : (
+                                                '데이터베이스 완전 초기화'
+                                            )}
                                         </button>
                                     </div>
                                 </div>

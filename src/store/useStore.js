@@ -22,6 +22,10 @@ const useStore = create((set, get) => ({
     admins: [], // [ { email, name } ]
     isInitialSyncComplete: false,
     isSyncInitialized: false,
+    isInitializingDefaults: false,
+    isResetting: false,
+    resetStatus: '',
+    isExporting: false,
 
     // Hierarchy & Settings
     competitionName: '...', // Loaded from DB
@@ -75,37 +79,60 @@ const useStore = create((set, get) => ({
         }
 
         let role = ''; // Default to empty to detect if found
+        let registeredName = null; // To store name from DB if found
 
         // 1. Root Admin Check
         const rootAdmins = (import.meta.env.VITE_ROOT_ADMIN_EMAILS || '').split(',').map(e => e.trim());
         if (rootAdmins.includes(currentUser.email)) {
             role = 'ROOT_ADMIN';
+            // Optional: Root Admin doesn't have a fixed name in DB usually, but we could enforce "Root Admin" if desired.
+            // keeping existing name for now or could defaulting if missing.
         }
 
         // 2. Admin Check
-        if (!role && admins.some(a => a.email === currentUser.email)) {
-            role = 'ADMIN';
+        // admins is [ { email, name } ]
+        const adminEntry = admins.find(a => a.email === currentUser.email);
+        if (adminEntry) {
+            if (!role) role = 'ADMIN';
+            registeredName = adminEntry.name;
         }
 
         // 3. Judge Check & Assigned Years Calculation
         const assignedYears = [];
+        let judgeEntry = null;
+
         Object.entries(judgesByYear).forEach(([yId, list]) => {
-            if (list.some(j => j.email === currentUser.email)) {
+            const found = list.find(j => j.email === currentUser.email);
+            if (found) {
                 if (!role) role = 'JUDGE';
                 assignedYears.push(yId);
+                // We pick the name from the first matched year entry as the canonical name
+                if (!registeredName && !judgeEntry) {
+                    judgeEntry = found;
+                }
             }
         });
+
+        if (!registeredName && judgeEntry) {
+            registeredName = judgeEntry.name;
+        }
 
         // 4. Default to USER if nothing found
         if (!role) role = 'USER';
 
-        // Update if changed (role or assignedYears)
+        // Update if changed (role, assignedYears, or name)
         const currentAssigned = currentUser.assignedYears ? currentUser.assignedYears.join(',') : '';
         const newAssigned = assignedYears.join(',');
 
-        if (currentUser.role !== role || currentAssigned !== newAssigned) {
-            set({ currentUser: { ...currentUser, role, assignedYears } });
-            console.log(`[Auth] User Role updated: ${currentUser.email} -> ${role}, Assigned: [${newAssigned}]`);
+        // Determine final name: Registered Name > Current Name > Email Prefix
+        const finalName = registeredName || currentUser.name || currentUser.email.split('@')[0];
+
+        if (currentUser.role !== role || currentAssigned !== newAssigned || currentUser.name !== finalName) {
+            const updatedUser = { ...currentUser, role, assignedYears, name: finalName };
+            set({ currentUser: updatedUser });
+            // Also update localStorage so it persists on refresh
+            localStorage.setItem('score_program_user', JSON.stringify({ ...updatedUser, lastLoginAt: Date.now() }));
+            console.log(`[Auth] User Synced: ${currentUser.email} -> Role: ${role}, Name: ${finalName}`);
         }
     },
 
@@ -154,28 +181,30 @@ const useStore = create((set, get) => ({
         const isJudge = currentUser?.role === 'JUDGE';
         if (!isAdmin && !isJudge) return;
 
-        // Check if year is locked
-        const yearId = categoryId.split('-')[0];
-        const year = years.find(y => y.id === yearId);
-        if (year?.locked && !isAdmin) {
-            console.error('Scoring is locked for this competition.');
-            return;
+        // Derive granular info from years state instead of categoryId string
+        let yearName = '?';
+        let genre = 'General';
+        let category = 'None';
+
+        for (const y of years) {
+            const cat = (y.categories || []).find(c => c.id === categoryId);
+            if (cat) {
+                yearName = y.name;
+                genre = cat.genre || 'General';
+                category = cat.category || cat.name;
+                break;
+            }
         }
 
         const docId = `${categoryId}_${participantId}_${currentUser.email.toLowerCase()}`;
         const scoreRef = doc(db, 'scores', docId);
         const snap = await getDoc(scoreRef);
 
-        // Derive granular info from categoryId (Legacy fallback)
-        const parts = categoryId.split('-');
-        const yearVal = parts[0];
-        const genreAndCat = parts.slice(1).join(' ');
-
         const currentValues = snap.exists() ? snap.data().values : {};
         await setDoc(scoreRef, {
-            year: yearVal,
-            genre: genreAndCat.split(' ')[0] || 'General',
-            category: genreAndCat.split(' ').slice(1).join(' ') || genreAndCat,
+            year: yearName,
+            genre: genre,
+            category: category,
             categoryId,
             participantId,
             judgeEmail: currentUser.email.toLowerCase(),
@@ -208,21 +237,78 @@ const useStore = create((set, get) => ({
 
     // Hierarchy Actions
     addYear: async (name) => {
-        const id = name.toLowerCase().replace(/\s+/g, '-');
+        const id = Math.random().toString(36).substr(2, 9);
         const year = { id, name, categories: [] };
         await setDoc(doc(db, 'years', id), year);
     },
 
     updateYear: async (yearId, newName) => {
-        await updateDoc(doc(db, 'years', yearId), { name: newName });
+        const batch = writeBatch(db);
+        const yearRef = doc(db, 'years', yearId);
+        const yearSnap = await getDoc(yearRef);
+        if (!yearSnap.exists()) return;
+
+        const oldName = yearSnap.data().name;
+        batch.update(yearRef, { name: newName });
+
+        // Cascading update for participants in all categories of this year
+        const categories = yearSnap.data().categories || [];
+        for (const cat of categories) {
+            const pQuery = query(collection(db, 'participants'), where('categoryId', '==', cat.id));
+            const pSnap = await getDocs(pQuery);
+            pSnap.docs.forEach(d => {
+                batch.update(d.ref, { year: newName });
+            });
+
+            const sQuery = query(collection(db, 'scores'), where('categoryId', '==', cat.id));
+            const sSnap = await getDocs(sQuery);
+            sSnap.docs.forEach(d => {
+                batch.update(d.ref, { year: newName });
+            });
+        }
+
+        await batch.commit();
     },
 
     deleteYear: async (yearId) => {
-        await deleteDoc(doc(db, 'years', yearId));
+        try {
+            console.log(`[Store] Deleting year: ${yearId}`);
+            const batch = writeBatch(db);
+            const yearRef = doc(db, 'years', yearId);
+            const yearSnap = await getDoc(yearRef);
+            if (!yearSnap.exists()) {
+                console.warn(`[Store] Year ${yearId} not found in DB.`);
+                return;
+            }
+
+            const categories = yearSnap.data().categories || [];
+
+            // 1. Delete Judges
+            const jSnap = await getDocs(query(collection(db, 'judges'), where('yearId', '==', yearId)));
+            jSnap.docs.forEach(d => batch.delete(d.ref));
+
+            // 2. Delete Categories, Participants, Scores
+            for (const cat of categories) {
+                const pSnap = await getDocs(query(collection(db, 'participants'), where('categoryId', '==', cat.id)));
+                pSnap.docs.forEach(d => batch.delete(d.ref));
+
+                const sSnap = await getDocs(query(collection(db, 'scores'), where('categoryId', '==', cat.id)));
+                sSnap.docs.forEach(d => batch.delete(d.ref));
+            }
+
+            // 3. Delete Year itself
+            batch.delete(yearRef);
+
+            await batch.commit();
+            console.log(`[Store] Year ${yearId} and associated data deleted successfully.`);
+        } catch (error) {
+            console.error('[Store] deleteYear failed:', error);
+            alert('연도 삭제 중 오류가 발생했습니다: ' + error.message);
+        }
     },
 
     addCategory: async (yearId, name) => {
-        const catId = `${yearId}-${name.toLowerCase().replace(/\s+/g, '-')}`;
+        const catId = Math.random().toString(36).substr(2, 9);
         const yearRef = doc(db, 'years', yearId);
         const yearSnap = await getDoc(yearRef);
 
@@ -230,7 +316,6 @@ const useStore = create((set, get) => ({
             const data = yearSnap.data();
             const yearVal = data.name || yearId;
 
-            // Simple parser: assumes name format might be "Genre Category" or just "Category"
             const parts = name.split(' ');
             const genre = parts.length > 1 ? parts[0] : 'General';
             const category = parts.length > 1 ? parts.slice(1).join(' ') : name;
@@ -279,27 +364,72 @@ const useStore = create((set, get) => ({
         }
     },
 
-    toggleYearLock: async (yearId, locked) => {
-        await updateDoc(doc(db, 'years', yearId), { locked });
+    toggleYearLock: async (yearId, isLocked) => {
+        const yearRef = doc(db, 'years', yearId);
+        const yearSnap = await getDoc(yearRef);
+
+        if (yearSnap.exists()) {
+            const data = yearSnap.data();
+            // Cascade: Update all categories to match the year's lock status
+            // Priority: Year Lock overrides individual category locks
+            const updatedCategories = (data.categories || []).map(cat => ({
+                ...cat,
+                locked: isLocked
+            }));
+
+            await updateDoc(yearRef, {
+                locked: isLocked,
+                categories: updatedCategories
+            });
+        }
     },
 
     updateCategory: async (yearId, categoryId, newName) => {
+        const batch = writeBatch(db);
         const yearRef = doc(db, 'years', yearId);
         const yearSnap = await getDoc(yearRef);
         if (yearSnap.exists()) {
+            const parts = newName.split(' ');
+            const newGenre = parts.length > 1 ? parts[0] : 'General';
+            const newCategory = parts.length > 1 ? parts.slice(1).join(' ') : newName;
+
             const categories = (yearSnap.data().categories || []).map(c =>
-                c.id === categoryId ? { ...c, name: newName } : c
+                c.id === categoryId ? { ...c, name: newName, genre: newGenre, category: newCategory } : c
             );
-            await updateDoc(yearRef, { categories });
+            batch.update(yearRef, { categories });
+
+            // Cascading update for participants and scores
+            const pSnap = await getDocs(query(collection(db, 'participants'), where('categoryId', '==', categoryId)));
+            pSnap.docs.forEach(d => batch.update(d.ref, { genre: newGenre, category: newCategory }));
+
+            const sSnap = await getDocs(query(collection(db, 'scores'), where('categoryId', '==', categoryId)));
+            sSnap.docs.forEach(d => batch.update(d.ref, { genre: newGenre, category: newCategory }));
+
+            await batch.commit();
         }
     },
 
     deleteCategory: async (yearId, categoryId) => {
-        const yearRef = doc(db, 'years', yearId);
-        const yearSnap = await getDoc(yearRef);
-        if (yearSnap.exists()) {
-            const categories = (yearSnap.data().categories || []).filter(c => c.id !== categoryId);
-            await updateDoc(yearRef, { categories });
+        try {
+            const batch = writeBatch(db);
+            const yearRef = doc(db, 'years', yearId);
+            const yearSnap = await getDoc(yearRef);
+            if (yearSnap.exists()) {
+                const categories = (yearSnap.data().categories || []).filter(c => c.id !== categoryId);
+                batch.update(yearRef, { categories });
+
+                // Delete participants and scores
+                const pSnap = await getDocs(query(collection(db, 'participants'), where('categoryId', '==', categoryId)));
+                pSnap.docs.forEach(d => batch.delete(d.ref));
+
+                const sSnap = await getDocs(query(collection(db, 'scores'), where('categoryId', '==', categoryId)));
+                sSnap.docs.forEach(d => batch.delete(d.ref));
+
+                await batch.commit();
+            }
+        } catch (error) {
+            console.error('[Store] deleteCategory failed:', error);
+            alert('종목 삭제 중 오류가 발생했습니다: ' + error.message);
         }
     },
 
@@ -311,6 +441,19 @@ const useStore = create((set, get) => ({
             order: index
         }));
         await updateDoc(yearRef, { categories: normalized });
+    },
+
+
+
+    toggleCategoryLock: async (yearId, categoryId, isLocked) => {
+        const yearRef = doc(db, 'years', yearId);
+        const yearSnap = await getDoc(yearRef);
+        if (yearSnap.exists()) {
+            const categories = (yearSnap.data().categories || []).map(c =>
+                c.id === categoryId ? { ...c, locked: isLocked } : c
+            );
+            await updateDoc(yearRef, { categories });
+        }
     },
 
     // Judge Actions
@@ -336,18 +479,29 @@ const useStore = create((set, get) => ({
     // Participant Actions
     addParticipant: async (categoryId, number, name) => {
         const id = Math.random().toString(36).substr(2, 9);
+        const { years } = get();
 
-        // Derive granular info
-        const parts = categoryId.split('-');
-        const year = parts[0];
-        const genreAndCat = parts.slice(1).join(' ');
+        // Find info from state
+        let yearName = '?';
+        let genre = 'General';
+        let category = 'None';
+
+        for (const y of years) {
+            const cat = (y.categories || []).find(c => c.id === categoryId);
+            if (cat) {
+                yearName = y.name;
+                genre = cat.genre || 'General';
+                category = cat.category || cat.name;
+                break;
+            }
+        }
 
         await setDoc(doc(db, 'participants', `${categoryId}_${id}`), {
             id,
             categoryId,
-            year,
-            genre: genreAndCat.split(' ')[0] || 'General',
-            category: genreAndCat.split(' ').slice(1).join(' ') || genreAndCat,
+            year: yearName,
+            genre,
+            category,
             number,
             name,
             createdAt: new Date().toISOString()
@@ -366,31 +520,108 @@ const useStore = create((set, get) => ({
     },
 
     // Data Management Actions
-    exportData: () => {
-        const state = get();
-        const exportObj = {
-            version: "1.3", // Version bump
-            timestamp: new Date().toISOString(),
-            years: state.years,
-            participants: state.participants,
-            judgesByYear: state.judgesByYear,
-            admins: state.admins,
-            scores: state.scores,
-            // Consolidate all settings
-            settings: {
-                general: { competitionName: state.competitionName },
-                scoring: { items: state.scoringItems },
-                // scoringItems is kept for backward compatibility if needed, but we use settings.scoring primary
-                scoringItems: state.scoringItems
+    exportData: async () => {
+        set({ isExporting: true });
+        try {
+            console.log('[Store] Starting full export...');
+            const collections = ['years', 'participants', 'judges', 'scores', 'admins'];
+            const data = {};
+
+            // Fetch all collections
+            for (const collName of collections) {
+                const snap = await getDocs(collection(db, collName));
+                if (collName === 'judges') {
+                    // Reconstruct judgesByYear map
+                    data.judgesByYear = {};
+                    snap.docs.forEach(doc => {
+                        const j = doc.data();
+                        if (!data.judgesByYear[j.yearId]) data.judgesByYear[j.yearId] = [];
+                        data.judgesByYear[j.yearId].push(j);
+                    });
+                } else if (collName === 'participants') {
+                    // Reconstruct participants map
+                    data.participants = {};
+                    snap.docs.forEach(doc => {
+                        const p = doc.data();
+                        if (!data.participants[p.categoryId]) data.participants[p.categoryId] = [];
+                        data.participants[p.categoryId].push(p);
+                    });
+                } else if (collName === 'scores') {
+                    // Reconstruct scores map
+                    data.scores = {};
+                    snap.docs.forEach(doc => {
+                        const s = doc.data();
+                        // s.id is like catId_pId_email
+                        // Structure: scores[catId][pId][email] = values
+                        if (!data.scores[s.categoryId]) data.scores[s.categoryId] = {};
+                        if (!data.scores[s.categoryId][s.participantId]) data.scores[s.categoryId][s.participantId] = {};
+                        data.scores[s.categoryId][s.participantId][s.judgeEmail] = s.values;
+                    });
+                } else {
+                    // years, admins
+                    data[collName] = snap.docs.map(doc => doc.data());
+                }
             }
-        };
-        const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(exportObj, null, 2));
-        const downloadAnchorNode = document.createElement('a');
-        downloadAnchorNode.setAttribute("href", dataStr);
-        downloadAnchorNode.setAttribute("download", `score_program_backup_${new Date().toISOString().split('T')[0]}.json`);
-        document.body.appendChild(downloadAnchorNode);
-        downloadAnchorNode.click();
-        downloadAnchorNode.remove();
+
+            // Fetch Settings
+            const settingsSnap = await getDocs(collection(db, 'settings'));
+            data.settings = {};
+            settingsSnap.docs.forEach(doc => {
+                data.settings[doc.id] = doc.data();
+            });
+
+            // Construct final export object matching previous structure
+            const exportObj = {
+                version: "1.4", // Version bump for full async export
+                timestamp: new Date().toISOString(),
+                years: data.years || [],
+                participants: data.participants || {},
+                judgesByYear: data.judgesByYear || {},
+                admins: data.admins || [],
+                scores: data.scores || {},
+                settings: {
+                    general: data.settings.general || { competitionName: get().competitionName },
+                    scoring: data.settings.scoring || { items: get().scoringItems },
+                    // Legacy support
+                }
+            };
+
+            const dataStr = JSON.stringify(exportObj, null, 2);
+            console.log('[Store] DEBUG: JSON string length:', dataStr.length);
+
+            const blob = new Blob([dataStr], { type: "application/json" });
+            console.log('[Store] DEBUG: Blob created, size:', blob.size);
+
+            const url = URL.createObjectURL(blob);
+            console.log('[Store] DEBUG: Blob URL generated:', url);
+
+            const filename = `score_program_backup_FULL_${new Date().toISOString().split('T')[0]}.json`;
+            console.log('[Store] DEBUG: Intended filename:', filename);
+
+            const downloadAnchorNode = document.createElement('a');
+            downloadAnchorNode.setAttribute("href", url);
+            downloadAnchorNode.setAttribute("download", filename);
+            document.body.appendChild(downloadAnchorNode);
+
+            console.log('[Store] DEBUG: Triggering click on anchor tag');
+            downloadAnchorNode.click();
+
+            console.log('[Store] DEBUG: Click triggered, removing anchor');
+            downloadAnchorNode.remove();
+
+            // Delay cleanup slightly to ensure browser registers the click
+            setTimeout(() => {
+                URL.revokeObjectURL(url);
+                console.log('[Store] DEBUG: Blob URL revoked');
+            }, 100);
+
+            console.log('[Store] Full export complete.');
+        } catch (error) {
+            console.error('[Store] Export failed:', error);
+            alert('데이터 내보내기 중 오류가 발생했습니다: ' + error.message);
+        } finally {
+            set({ isExporting: false });
+        }
     },
 
     importData: async (jsonData, mode = 'merge') => {
@@ -400,16 +631,11 @@ const useStore = create((set, get) => ({
 
             // 1. Clear existing data if mode is 'replace'
             if (mode === 'replace') {
-                // DO NOT delete 'settings' blindly, as it contains scoring/general config that might not be in JSON
-                const collections = ['years', 'participants', 'judges', 'scores', 'admins', 'scoringItems'];
+                const collections = ['years', 'participants', 'judges', 'scores', 'admins'];
                 for (const collName of collections) {
                     const snap = await getDocs(collection(db, collName));
                     snap.docs.forEach(doc => batch.delete(doc.ref));
                 }
-
-                // Explicitly handle settings docs if needed, or leave them to be overwritten
-                // If we want to ensure "clean slate" for settings, we should only delete if we have new data?
-                // For now, let's play safe: Don't delete settings unless overwritten.
             }
 
             // 2. Import Years & Categories
@@ -421,7 +647,6 @@ const useStore = create((set, get) => ({
 
             // 3. Import Participants
             if (data.participants) {
-                // Handle both flat array or object grouped by cat
                 const pList = Array.isArray(data.participants)
                     ? data.participants
                     : Object.values(data.participants).flat();
@@ -430,15 +655,12 @@ const useStore = create((set, get) => ({
                     if (!p.id || !p.categoryId) return;
                     const parts = p.categoryId.split('-');
                     const docId = `${p.categoryId}_${p.id}`;
-
-                    // Ensure granular fields even if missing in JSON
-                    const pData = {
+                    batch.set(doc(db, 'participants', docId), {
                         ...p,
                         year: p.year || parts[0],
                         genre: p.genre || (parts.slice(1).join(' ').split(' ')[0] || 'General'),
                         category: p.category || (parts.slice(1).join(' ').split(' ').slice(1).join(' ') || parts.slice(1).join(' '))
-                    };
-                    batch.set(doc(db, 'participants', docId), pData);
+                    });
                 });
             }
 
@@ -451,45 +673,25 @@ const useStore = create((set, get) => ({
                 });
             }
 
-            // 5 & 6. Import Settings (General & Scoring)
+            // 5 & 6. Import Settings
             if (data.settings) {
-                // If it's the new nested structure
-                if (data.settings.general) {
-                    batch.set(doc(db, 'settings', 'general'), data.settings.general);
-                }
-                if (data.settings.scoring) {
-                    batch.set(doc(db, 'settings', 'scoring'), data.settings.scoring);
-                }
-                // Handle competition settings
-                if (data.settings.competition) {
-                    batch.set(doc(db, 'settings', 'competition'), data.settings.competition);
-                } else if (!data.settings.general && !data.settings.scoring) {
-                    // Legacy structure where data.settings was the competition doc itself
-                    batch.set(doc(db, 'settings', 'competition'), data.settings);
-                }
-            } else if (data.scoringItems) {
-                // Backward compatibility for old JSON (v1.2 or earlier)
-                batch.set(doc(db, 'settings', 'scoring'), { items: data.scoringItems });
+                if (data.settings.general) batch.set(doc(db, 'settings', 'general'), data.settings.general);
+                if (data.settings.scoring) batch.set(doc(db, 'settings', 'scoring'), data.settings.scoring);
             }
-
-
 
             // 7. Import Scores
             if (data.scores) {
-                // scores map: { [catId]: { [pId]: { [email]: values } } }
                 Object.entries(data.scores).forEach(([catId, pMap]) => {
                     Object.entries(pMap).forEach(([pId, judgeMap]) => {
                         Object.entries(judgeMap).forEach(([email, values]) => {
-                            // Reconstruct ID: catId_pId_email
                             const scoreId = `${catId}_${pId}_${email.toLowerCase()}`;
-                            const scoreData = {
+                            batch.set(doc(db, 'scores', scoreId), {
                                 categoryId: catId,
                                 participantId: pId,
                                 judgeEmail: email.toLowerCase(),
                                 values: values,
                                 updatedAt: new Date().toISOString()
-                            };
-                            batch.set(doc(db, 'scores', scoreId), scoreData);
+                            });
                         });
                     });
                 });
@@ -503,92 +705,104 @@ const useStore = create((set, get) => ({
         }
     },
 
-    // Data Normalization Tool
+    clearAllData: async () => {
+        if (!confirm('주의: 데이터베이스의 모든 정보(연도, 종목, 참가자, 점수, 심사위원, 관리자)가 영구적으로 삭제됩니다. 계속하시겠습니까?')) return;
+
+        set({ isResetting: true, resetStatus: '초기화 준비 중...' });
+
+        try {
+            console.log('[Store] Full Database Reset initiated...');
+            const collections = ['years', 'participants', 'judges', 'scores', 'admins'];
+
+            for (const collName of collections) {
+                set({ resetStatus: `${collName} 컬렉션 삭제 중...` });
+                const snap = await getDocs(collection(db, collName));
+
+                // Firestore writeBatch has a limit of 500 operations.
+                // We process in chunks of 400 to be safe.
+                const docs = snap.docs;
+                for (let i = 0; i < docs.length; i += 400) {
+                    const chunk = docs.slice(i, i + 400);
+                    const batch = writeBatch(db);
+                    chunk.forEach(docSnap => batch.delete(docSnap.ref));
+                    set({ resetStatus: `${collName} 삭제 중 (${i + chunk.length}/${docs.length})...` });
+                    await batch.commit();
+                }
+            }
+
+            set({ resetStatus: '설정 초기화 중...' });
+            const settingsBatch = writeBatch(db);
+            // Reset competition name to default
+            settingsBatch.set(doc(db, 'settings', 'general'), { competitionName: 'Korea Latin Dance Cup' });
+            // Also reset scoring items to defaults
+            const defaultScoring = [
+                { id: 'tech', label: '기술점수', order: 0 },
+                { id: 'art', label: '예술점수', order: 1 },
+            ];
+            settingsBatch.set(doc(db, 'settings', 'scoring'), { items: defaultScoring });
+            await settingsBatch.commit();
+
+            set({ resetStatus: '기본 데이터 생성 중...' });
+            await get().initDefaults();
+
+            console.log('[Store] Full Database Reset complete.');
+            set({ resetStatus: '완료!' });
+            alert('데이터베이스가 성공적으로 초기화되었습니다.');
+        } catch (error) {
+            console.error('[Store] clearAllData failed:', error);
+            alert('초기화 중 오류가 발생했습니다: ' + error.message);
+        } finally {
+            set({ isResetting: false, resetStatus: '' });
+        }
+    },
+
     normalizeDatabase: async () => {
         const batch = writeBatch(db);
         let updateCount = 0;
 
-        // 1. Normalize Judges
-        const judgesSnap = await getDocs(collection(db, 'judges'));
-        judgesSnap.docs.forEach(docSnap => {
-            const data = docSnap.data();
-            const lowerEmail = data.email.toLowerCase();
-            const correctId = `${data.yearId}_${lowerEmail}`;
+        const collections = [
+            { coll: 'judges', idField: (data) => `${data.yearId}_${data.email.toLowerCase()}`, emailField: 'email' },
+            { coll: 'admins', idField: (data) => data.email.toLowerCase(), emailField: 'email' }
+        ];
 
-            if (docSnap.id !== correctId || data.email !== lowerEmail) {
-                batch.delete(docSnap.ref);
-                batch.set(doc(db, 'judges', correctId), {
-                    ...data,
-                    email: lowerEmail
-                });
-                updateCount++;
-            }
-        });
+        for (const cfg of collections) {
+            const snap = await getDocs(collection(db, cfg.coll));
+            snap.docs.forEach(docSnap => {
+                const data = docSnap.data();
+                const lowerEmail = data[cfg.emailField].toLowerCase();
+                const correctId = cfg.idField(data);
 
-        // 2. Normalize Admins
-        const adminsSnap = await getDocs(collection(db, 'admins'));
-        adminsSnap.docs.forEach(docSnap => {
-            const data = docSnap.data();
-            const lowerEmail = data.email.toLowerCase();
+                if (docSnap.id !== correctId || data[cfg.emailField] !== lowerEmail) {
+                    batch.delete(docSnap.ref);
+                    batch.set(doc(db, cfg.coll, correctId), { ...data, [cfg.emailField]: lowerEmail });
+                    updateCount++;
+                }
+            });
+        }
 
-            if (docSnap.id !== lowerEmail || data.email !== lowerEmail) {
-                batch.delete(docSnap.ref);
-                batch.set(doc(db, 'admins', lowerEmail), {
-                    ...data,
-                    email: lowerEmail
-                });
-                updateCount++;
-            }
-        });
-
-        // 3. Normalize Scores
         const scoresSnap = await getDocs(collection(db, 'scores'));
         scoresSnap.docs.forEach(docSnap => {
             const data = docSnap.data();
             const parts = docSnap.id.split('_');
-
             if (parts.length >= 3) {
-                const catId = parts[0];
-                const pId = parts[1];
-                const emailPart = parts.slice(2).join('_');
-                const lowerEmail = emailPart.toLowerCase();
-                const correctId = `${catId}_${pId}_${lowerEmail}`;
-
-                // Check if ID is wrong OR internal field is wrong
+                const lowerEmail = parts.slice(2).join('_').toLowerCase();
+                const correctId = `${parts[0]}_${parts[1]}_${lowerEmail}`;
                 if (docSnap.id !== correctId || data.judgeEmail !== lowerEmail) {
                     batch.delete(docSnap.ref);
-                    batch.set(doc(db, 'scores', correctId), {
-                        ...data,
-                        judgeEmail: lowerEmail
-                    });
+                    batch.set(doc(db, 'scores', correctId), { ...data, judgeEmail: lowerEmail });
                     updateCount++;
                 }
             }
         });
 
-        if (updateCount > 0) {
-            await batch.commit();
-        }
+        if (updateCount > 0) await batch.commit();
         return updateCount;
-    },
-
-    clearAllData: async () => {
-        if (!window.confirm("정말로 모든 데이터를 삭제하시겠습니까? 이 작업은 되돌릴 수 없습니다.")) return;
-        const batch = writeBatch(db);
-        const collections = ['years', 'participants', 'judges', 'scores', 'admins', 'settings', 'scoringItems'];
-        for (const collName of collections) {
-            const snap = await getDocs(collection(db, collName));
-            snap.docs.forEach(doc => batch.delete(doc.ref));
-        }
-        await batch.commit();
-        alert("모든 데이터가 삭제되었습니다.");
     },
 
     batchUpdateParticipants: async (categoryId, updates) => {
         const batch = writeBatch(db);
         updates.forEach(update => {
-            const ref = doc(db, 'participants', `${categoryId}_${update.id}`);
-            batch.update(ref, update);
+            batch.update(doc(db, 'participants', `${categoryId}_${update.id}`), update);
         });
         await batch.commit();
     },
@@ -657,17 +871,16 @@ const useStore = create((set, get) => ({
         const year = years.find(y => y.id === yearId);
         if (!year) return;
 
-        // Note: Firestore doesn't have a direct "delete where" for collections.
-        // For a full production app, we would use a Cloud Function.
-        // For this test tool, we'll fetch and delete.
-        const q = query(collection(db, 'scores'));
-        const snapshot = await getDocs(q);
         const batch = writeBatch(db);
-        snapshot.docs.forEach(d => {
-            if (d.id.startsWith(yearId)) {
+        const categoryIds = (year.categories || []).map(c => c.id);
+
+        for (const catId of categoryIds) {
+            const q = query(collection(db, 'scores'), where('categoryId', '==', catId));
+            const snapshot = await getDocs(q);
+            snapshot.docs.forEach(d => {
                 batch.delete(d.ref);
-            }
-        });
+            });
+        }
         await batch.commit();
     },
 
@@ -782,11 +995,12 @@ const useStore = create((set, get) => ({
             }
         }, 5000);
 
-        // Sync Years
         onSnapshot(collection(db, 'years'), (snapshot) => {
             const years = snapshot.docs.map(doc => doc.data());
             set({ years: years.sort((a, b) => b.name.localeCompare(a.name)) });
-            if (years.length === 0) get().initDefaults();
+            if (years.length === 0 && !get().isInitializingDefaults) {
+                get().initDefaults();
+            }
             checkAllSynced('years');
         });
 
@@ -869,21 +1083,43 @@ const useStore = create((set, get) => ({
     },
 
     initDefaults: async () => {
-        const defaultCats = [
-            'Salsa Couple', 'Bachata Couple', 'Salsa Shine Solo Man',
-            'Salsa Shine Solo Woman', 'Salsa Shine Duo', 'Bachata Shine Duo',
-            'Salsa Group', 'Bachata Group', 'Senior 종합'
-        ];
-        const years = ['2024', '2025', '2026'];
+        if (get().isInitializingDefaults) return;
+        set({ isInitializingDefaults: true });
+        console.log('[Store] Initializing default data...');
 
-        for (const year of years) {
-            const id = year;
-            const categories = defaultCats.map((name, i) => ({
-                id: `${id}-${name.toLowerCase().replace(/\s+/g, '-')}`,
-                name,
-                order: i
-            }));
-            await setDoc(doc(db, 'years', id), { id, name: year, categories, locked: false });
+        try {
+            const defaultCats = [
+                'Salsa Couple', 'Bachata Couple', 'Salsa Shine Solo Man',
+                'Salsa Shine Solo Woman', 'Salsa Shine Duo', 'Bachata Shine Duo',
+                'Salsa Group', 'Bachata Group', 'Senior 종합'
+            ];
+            const yearsList = ['2024', '2025', '2026'];
+
+            const batch = writeBatch(db);
+
+            for (const year of yearsList) {
+                const yearId = Math.random().toString(36).substr(2, 9);
+                const categories = defaultCats.map((name, i) => {
+                    const parts = name.split(' ');
+                    const genre = parts.length > 1 ? parts[0] : 'General';
+                    const category = parts.length > 1 ? parts.slice(1).join(' ') : name;
+                    return {
+                        id: Math.random().toString(36).substr(2, 9),
+                        name,
+                        genre,
+                        category,
+                        year: year,
+                        order: i
+                    };
+                });
+                batch.set(doc(db, 'years', yearId), { id: yearId, name: year, categories, locked: false });
+            }
+            await batch.commit();
+            console.log('[Store] Default data initialized.');
+        } catch (error) {
+            console.error('[Store] initDefaults failed:', error);
+        } finally {
+            set({ isInitializingDefaults: false });
         }
     }
 }));

@@ -29,6 +29,7 @@ const Scorer = () => {
 
     // Auth & Lock logic
     const isYearLocked = currentYear?.locked;
+    const isCategoryLocked = currentYear?.categories?.find(c => c.id === selectedCategoryId)?.locked;
     const isAdmin = currentUser?.role === 'ADMIN' || currentUser?.role === 'ROOT_ADMIN';
     const isJudge = currentUser?.role === 'JUDGE';
     const isSpectator = currentUser?.role === 'SPECTATOR';
@@ -37,7 +38,7 @@ const Scorer = () => {
     // Auth: Everyone can view, but only Admin/Assigned Judge can edit
     const isAuthorized = true;
     const canEdit = isAdmin || isJudge;
-    const isLocked = (isYearLocked && !isAdmin) || !canEdit;
+    const isLocked = (isYearLocked || isCategoryLocked) && !isAdmin;
 
     console.log('[Scorer Debug]', {
         email: currentUser?.email,
@@ -45,6 +46,7 @@ const Scorer = () => {
         isSpectator,
         isLocked,
         isYearLocked,
+        isCategoryLocked,
         selectedCategoryId
     });
 

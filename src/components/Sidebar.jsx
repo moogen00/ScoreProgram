@@ -27,6 +27,8 @@ const Sidebar = ({ width, isOpen, onClose, onRequestLogout }) => {
         competitionName,
         setCompetitionName,
         updateCategoriesOrder,
+        reorderCategory,
+        toggleCategoryLock
     } = useStore();
 
     const [expandedYears, setExpandedYears] = useState({ '2025': true });
@@ -84,17 +86,40 @@ const Sidebar = ({ width, isOpen, onClose, onRequestLogout }) => {
         }
     };
 
-    const handleDeleteYear = (id, name) => {
-        if (window.confirm(`'${name}' 연도와 해당 연도의 모든 종목, 데이터가 삭제됩니다. 정말 삭제하시겠습니까?`)) {
-            deleteYear(id);
+    const handleDeleteYear = async (e, id) => {
+        e.stopPropagation();
+        if (window.confirm('정말 이 연도의 모든 데이터를 삭제하시겠습니까?\n(참가자, 점수 결과 등 포함)')) {
+            await deleteYear(id);
         }
     };
 
-    const handleToggleYearLock = (id, currentLocked) => {
-        const action = currentLocked ? '해제' : '설정';
-        if (window.confirm(`이 연도의 점수 수정을 ${action}하시겠습니까?`)) {
-            toggleYearLock(id, !currentLocked);
+    const handleToggleYearLock = async (e, year) => {
+        e.stopPropagation();
+        const msg = year.locked
+            ? `${year.name} 데이터 전체를 잠금 해제 하시겠습니까?`
+            : `${year.name} 데이터 전체를 잠금 하시겠습니까?`;
+
+        if (window.confirm(msg)) {
+            await toggleYearLock(year.id, !year.locked);
         }
+    };
+
+    const handleToggleCategoryLock = async (e, yearId, cat) => {
+        e.stopPropagation();
+        const year = allYears.find(y => y.id === yearId);
+        const msg = cat.locked
+            ? `${year?.name || '해당 연도'} [${cat.name}] 데이터를 잠금 해제 하시겠습니까?`
+            : `${year?.name || '해당 연도'} [${cat.name}] 데이터를 잠금 하시겠습니까?`;
+
+        if (window.confirm(msg)) {
+            await toggleCategoryLock(yearId, cat.id, !cat.locked);
+        }
+    };
+
+    const handleEditCategory = (e, cat) => {
+        e.stopPropagation();
+        setEditingCatId(cat.id);
+        setTempCatName(cat.name);
     };
 
     const handleUpdateCategory = (yearId, catId) => {
@@ -118,6 +143,7 @@ const Sidebar = ({ width, isOpen, onClose, onRequestLogout }) => {
     const CategoryItem = ({ cat, yearId }) => {
         const dragControls = useDragControls();
         const isActive = selectedCategoryId === cat.id;
+        const userRole = currentUser?.role || 'USER'; // Define userRole here for CategoryItem
 
         return (
             <Reorder.Item
@@ -175,18 +201,19 @@ const Sidebar = ({ width, isOpen, onClose, onRequestLogout }) => {
                             <div className="absolute left-0 w-1 h-4 bg-indigo-500 rounded-full" />
                         )}
                         <Layers size={12} className={cn("shrink-0", isActive ? "text-indigo-400" : "text-slate-700")} />
-                        <span className="flex-1 text-[13px] font-bold tracking-tight text-left whitespace-normal py-1 leading-tight">{cat.name}</span>
-
+                        <span className="truncate flex-1">{cat.name}</span>
                         {(userRole === 'ADMIN' || userRole === 'ROOT_ADMIN') && (
-                            <div className="flex items-center gap-1 opacity-0 group-hover/cat:opacity-100 transition-opacity mr-2 relative z-10">
+                            <div className="flex items-center gap-1 opacity-0 group-hover/cat:opacity-100 transition-opacity">
                                 <button
-                                    onClick={(e) => {
-                                        e.stopPropagation();
-                                        setEditingCatId(cat.id);
-                                        setTempCatName(cat.name);
-                                    }}
-                                    className="p-1 text-slate-500 hover:text-indigo-400 hover:bg-white/10 rounded transition-colors"
-                                    title="수정"
+                                    onClick={(e) => handleToggleCategoryLock(e, yearId, cat)}
+                                    className={cn("p-1 hover:bg-white/10 rounded", cat.locked ? "text-rose-400 opacity-100" : "text-emerald-400")}
+                                    title={cat.locked ? "잠금 해제" : "잠금"}
+                                >
+                                    {cat.locked ? <Lock size={12} /> : <Unlock size={12} />}
+                                </button>
+                                <button
+                                    onClick={(e) => handleEditCategory(e, cat)}
+                                    className="p-1 text-slate-400 hover:text-white hover:bg-white/10 rounded"
                                 >
                                     <Edit2 size={12} />
                                 </button>
@@ -202,6 +229,7 @@ const Sidebar = ({ width, isOpen, onClose, onRequestLogout }) => {
                                 </button>
                             </div>
                         )}
+                        {cat.locked && (userRole !== 'ADMIN' && userRole !== 'ROOT_ADMIN') && <Lock size={12} className="text-rose-400 mr-2" />}
                     </div>
                 )}
             </Reorder.Item>
@@ -367,11 +395,11 @@ const Sidebar = ({ width, isOpen, onClose, onRequestLogout }) => {
                                     {(userRole === 'ADMIN' || userRole === 'ROOT_ADMIN') && (
                                         <div className="flex items-center gap-1 opacity-0 group-hover/btn:opacity-100 transition-opacity mr-2">
                                             <button
-                                                onClick={(e) => { e.stopPropagation(); handleToggleYearLock(year.id, year.locked); }}
-                                                className={cn("p-1 rounded hover:bg-white/10", year.locked ? "text-rose-400" : "text-emerald-400")}
-                                                title={year.locked ? "잠금 해제" : "잠금 설정"}
+                                                onClick={(e) => handleToggleYearLock(e, year)}
+                                                className={cn("p-1.5 rounded-lg transition-colors", year.locked ? "text-rose-400 bg-rose-500/10" : "text-emerald-400 hover:bg-emerald-500/10")}
+                                                title={year.locked ? "연도 잠금 해제" : "연도 잠금"}
                                             >
-                                                {year.locked ? <Lock size={12} /> : <Unlock size={12} />}
+                                                {year.locked ? <Lock size={14} /> : <Unlock size={14} />}
                                             </button>
                                             <button
                                                 onClick={(e) => {
@@ -385,11 +413,11 @@ const Sidebar = ({ width, isOpen, onClose, onRequestLogout }) => {
                                                 <Edit2 size={12} />
                                             </button>
                                             <button
-                                                onClick={(e) => { e.stopPropagation(); handleDeleteYear(year.id, year.name); }}
-                                                className="p-1 text-slate-500 hover:text-rose-400 rounded hover:bg-white/10"
-                                                title="삭제"
+                                                onClick={(e) => handleDeleteYear(e, year.id)}
+                                                className="p-1.5 text-slate-500 hover:text-rose-400 hover:bg-rose-500/10 rounded-lg transition-colors"
+                                                title="연도 삭제"
                                             >
-                                                <Trash2 size={12} />
+                                                <Trash2 size={14} />
                                             </button>
                                         </div>
                                     )}
