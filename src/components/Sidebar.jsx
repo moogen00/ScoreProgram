@@ -201,7 +201,7 @@ const Sidebar = ({ width, isOpen, onClose, onRequestLogout }) => {
                             <div className="absolute left-0 w-1 h-4 bg-indigo-500 rounded-full" />
                         )}
                         <Layers size={12} className={cn("shrink-0", isActive ? "text-indigo-400" : "text-slate-700")} />
-                        <span className="truncate flex-1">{cat.name}</span>
+                        <span className="flex-1 whitespace-normal break-words leading-tight py-1">{cat.name}</span>
                         {(userRole === 'ADMIN' || userRole === 'ROOT_ADMIN') && (
                             <div className="flex items-center gap-1 opacity-0 group-hover/cat:opacity-100 transition-opacity">
                                 <button

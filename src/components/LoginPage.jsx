@@ -21,6 +21,7 @@ const LoginPage = () => {
         const isJudge = Object.values(judgesByYear || {}).some(yearJudges => yearJudges.some(j => j.email === email));
 
         // Strict Check: Enforce strictly in Production, allow loose access in Dev
+        // Strict Check: Enforce strictly in Production, allow loose access in Dev
         if (import.meta.env.PROD && !isAdmin && !isJudge) {
             alert('권한이 없는 계정입니다. (Unauthorized Account)\n\n관리자나 심사위원으로 등록된 계정만 로그인할 수 있습니다.');
             return; // STOP EXECUTION: Do not proceed to login

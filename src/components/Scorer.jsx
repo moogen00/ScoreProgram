@@ -9,7 +9,7 @@ function cn(...inputs) {
 }
 
 const Scorer = () => {
-    const { scoringItems, updateScore, selectedCategoryId, scores, participants, currentUser, years, judgesByYear, isInitialSyncComplete } = useStore();
+    const { scoringItems, updateScore, submitCategoryScores, toggleJudgeSubmission, selectedCategoryId, scores, participants, currentUser, years, judgesByYear, isInitialSyncComplete } = useStore();
 
     console.log(`[Scorer] Rendering. Category: ${selectedCategoryId}, Participants count: ${participants[selectedCategoryId]?.length || 0}`);
     if (participants[selectedCategoryId]) {
@@ -35,10 +35,20 @@ const Scorer = () => {
     const isSpectator = currentUser?.role === 'SPECTATOR';
     const isJudgeForThisYear = judgesByYear[currentYearId]?.some(j => j.email === currentUser?.email);
 
+    const myJudgeRecord = useMemo(() => judgesByYear[currentYearId]?.find(j => j.email === currentUser?.email), [judgesByYear, currentYearId, currentUser]);
+    const isSubmitted = myJudgeRecord?.submittedCategories?.[selectedCategoryId] || false;
+
     // Auth: Everyone can view, but only Admin/Assigned Judge can edit
     const isAuthorized = true;
     const canEdit = isAdmin || isJudge;
-    const isLocked = (isYearLocked || isCategoryLocked) && !isAdmin;
+    const isGlobalLocked = isYearLocked || isCategoryLocked;
+    // Lock if Global Lock is ON, OR if Submitted (and not Admin)
+    // Admin is immune to Submission Lock (can edit anytime), but subject to Global Lock if we want strictness? 
+    // Usually Admin can override all, but let's respect Global Lock for visual consistency, or allow Admin override.
+    // Existing logic: "&& !isAdmin" means Admin is NEVER locked. 
+    // User said: "Admin data lock priority is high". 
+    // Let's keep Admin unlocked generally, but for Judge:
+    const isLocked = (isGlobalLocked || isSubmitted) && !isAdmin;
 
     console.log('[Scorer Debug]', {
         email: currentUser?.email,
@@ -84,16 +94,21 @@ const Scorer = () => {
         }));
     };
 
-    const handleBlur = async (participantId, itemId) => {
-        if (isLocked) return;
-        const val = localScores[participantId]?.[itemId];
-        if (val === '' || val === undefined) return;
+    const handleToggleSubmit = async () => {
+        if (isGlobalLocked && !isAdmin) return; // Cannot toggle if globally locked
 
         setIsSaving(true);
         try {
-            await updateScore(selectedCategoryId, participantId, itemId, val);
+            if (isSubmitted) {
+                // Currently Submitted -> Unlock (Edit Mode)
+                await toggleJudgeSubmission(selectedCategoryId, false);
+            } else {
+                // Currently Editing -> Save & Submit
+                await submitCategoryScores(selectedCategoryId, localScores);
+            }
         } catch (e) {
-            console.error("Save failed", e);
+            console.error("Toggle Submit failed", e);
+            alert("처리 중 오류가 발생했습니다.");
         } finally {
             setIsSaving(false);
         }
@@ -282,13 +297,48 @@ const Scorer = () => {
                 </div>
 
                 <div className="flex items-center gap-3">
-                    {(isLocked) && (
+                    {/* Admin/Global Lock Indicator */}
+                    {(isGlobalLocked) && (
                         <div className="bg-rose-500/20 border border-rose-500/50 px-4 py-2 rounded-lg flex items-center gap-2 text-rose-400 font-bold animate-pulse">
                             <Lock size={16} />
-                            <span>LOCKED</span>
+                            <span>ADMIN LOCKED</span>
                         </div>
                     )}
-                    {(!isLocked) && (
+
+                    {/* Submission Toggle Button (For Judges ONLY) */}
+                    {(!isGlobalLocked && isAuthorized && !isAdmin) && (
+                        <button
+                            onClick={handleToggleSubmit}
+                            disabled={isSaving}
+                            className={cn(
+                                "px-6 py-2 rounded-lg flex items-center gap-2 font-bold transition-all shadow-lg active:scale-95",
+                                isSubmitted
+                                    ? "bg-indigo-500 hover:bg-indigo-600 text-white border border-indigo-400/30"
+                                    : "bg-emerald-500 hover:bg-emerald-600 text-white border border-emerald-400/30",
+                                isSaving && "opacity-50 cursor-wait"
+                            )}
+                        >
+                            {isSaving ? (
+                                <>
+                                    <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                                    <span>Processing...</span>
+                                </>
+                            ) : isSubmitted ? (
+                                <>
+                                    <PenTool size={16} />
+                                    <span>수정하기</span>
+                                </>
+                            ) : (
+                                <>
+                                    <Save size={16} />
+                                    <span>저장 후 제출</span>
+                                </>
+                            )}
+                        </button>
+                    )}
+
+                    {/* Admin Status Indicator (Active/Unlocked) */}
+                    {(!isGlobalLocked && isAdmin) && (
                         <div className="bg-emerald-500/20 border border-emerald-500/50 px-4 py-2 rounded-lg flex items-center gap-2 text-emerald-400 font-bold">
                             <PenTool size={16} />
                             <span>ACTIVE</span>
@@ -446,7 +496,7 @@ const Scorer = () => {
                                                                             disabled={isLocked}
                                                                             value={localScores[p.id]?.[item.id] ?? ''}
                                                                             onChange={(e) => handleScoreChange(p.id, item.id, e.target.value)}
-                                                                            onBlur={() => handleBlur(p.id, item.id)}
+                                                                            onWheel={(e) => e.target.blur()}
                                                                             className={cn(
                                                                                 "w-full h-full bg-transparent text-center font-mono font-bold text-lg outline-none placeholder-white/10",
                                                                                 isActive ? "text-indigo-400" : "text-white",
@@ -553,7 +603,7 @@ const Scorer = () => {
                                                                             disabled={isLocked}
                                                                             value={localScores[p.id]?.[item.id] ?? ''}
                                                                             onChange={(e) => handleScoreChange(p.id, item.id, e.target.value)}
-                                                                            onBlur={() => handleBlur(p.id, item.id)}
+                                                                            onWheel={(e) => e.target.blur()}
                                                                             className={cn(
                                                                                 "w-full bg-transparent text-center font-mono font-black text-2xl outline-none py-1",
                                                                                 isActive ? "text-indigo-400" : "text-white",
@@ -661,7 +711,7 @@ const Scorer = () => {
                 {isSaving && (
                     <span className="flex items-center gap-2 animate-pulse text-emerald-400"><Save size={12} /> Saving...</span>
                 )}
-                <span className="flex items-center gap-2"><div className="w-2 h-2 rounded-full bg-indigo-500"></div> Auto-Saving Enabled</span>
+                <span className="flex items-center gap-2"><div className={cn("w-2 h-2 rounded-full", isSubmitted ? "bg-emerald-500" : "bg-amber-500")}></div> {isSubmitted ? "Submitted" : "Draft (Not Submitted)"}</span>
             </div>
         </div>
     );

@@ -175,13 +175,14 @@ const useStore = create((set, get) => ({
 
     // Scorer Actions
     updateScore: async (categoryId, participantId, itemId, score) => {
+        // ... (kept for backward compatibility or single updates if needed)
         const { currentUser, years } = get();
         // Permission check: Only JUDGE or ADMIN/ROOT_ADMIN can edit
         const isAdmin = currentUser?.role === 'ADMIN' || currentUser?.role === 'ROOT_ADMIN';
         const isJudge = currentUser?.role === 'JUDGE';
         if (!isAdmin && !isJudge) return;
 
-        // Derive granular info from years state instead of categoryId string
+        // Derive granular info from years state
         let yearName = '?';
         let genre = 'General';
         let category = 'None';
@@ -213,6 +214,89 @@ const useStore = create((set, get) => ({
                 [itemId]: parseFloat(score)
             },
             updatedAt: new Date().toISOString()
+        }, { merge: true });
+    },
+
+    submitCategoryScores: async (categoryId, scoresMap) => {
+        const { currentUser, years } = get();
+        const isAdmin = currentUser?.role === 'ADMIN' || currentUser?.role === 'ROOT_ADMIN';
+        const isJudge = currentUser?.role === 'JUDGE';
+        if (!isAdmin && !isJudge) return;
+
+        // Find context
+        let yearId = '';
+        let yearName = '?';
+        let genre = 'General';
+        let category = 'None';
+
+        for (const y of years) {
+            const cat = (y.categories || []).find(c => c.id === categoryId);
+            if (cat) {
+                yearId = y.id;
+                yearName = y.name;
+                genre = cat.genre || 'General';
+                category = cat.category || cat.name;
+                break;
+            }
+        }
+        if (!yearId) return;
+
+        const batch = writeBatch(db);
+        const email = currentUser.email.toLowerCase();
+
+        // 1. Update Scores
+        // scoresMap is { [participantId]: { [itemId]: value } }
+        for (const [pId, values] of Object.entries(scoresMap)) {
+            const docId = `${categoryId}_${pId}_${email}`;
+            const scoreRef = doc(db, 'scores', docId);
+
+            // Note: We use set with merge, but since we are submitting "final" state locally, 
+            // ensure we aren't overwriting other fields accidentally. 
+            // We construct the full object similar to updateScore
+            batch.set(scoreRef, {
+                year: yearName,
+                genre: genre,
+                category: category,
+                categoryId,
+                participantId: pId,
+                judgeEmail: email,
+                values: values, // This overwrites the values map for this judge-participant
+                updatedAt: new Date().toISOString()
+            }, { merge: true });
+        }
+
+        // 2. Mark as Submitted in Judge's record
+        // ID: yearId_email
+        const judgeRef = doc(db, 'judges', `${yearId}_${email}`);
+        batch.set(judgeRef, {
+            submittedCategories: {
+                [categoryId]: true
+            }
+        }, { merge: true });
+
+        await batch.commit();
+    },
+
+    toggleJudgeSubmission: async (categoryId, isSubmitted) => {
+        const { currentUser, years } = get();
+        // Find context for yearId
+        let yearId = '';
+        for (const y of years) {
+            const cat = (y.categories || []).find(c => c.id === categoryId);
+            if (cat) {
+                yearId = y.id;
+                break;
+            }
+        }
+        if (!yearId) return;
+
+        const email = currentUser.email.toLowerCase();
+        const judgeRef = doc(db, 'judges', `${yearId}_${email}`);
+
+        await setDoc(judgeRef, {
+            submittedCategories: {
+                [categoryId]: isSubmitted
+            }
         }, { merge: true });
     },
 
