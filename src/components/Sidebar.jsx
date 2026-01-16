@@ -174,8 +174,8 @@ const Sidebar = ({ width, isOpen, onClose, onRequestLogout }) => {
                         {isActive && (
                             <div className="absolute left-0 w-1 h-4 bg-indigo-500 rounded-full" />
                         )}
-                        <Layers size={12} className={isActive ? "text-indigo-400" : "text-slate-700"} />
-                        <span className="flex-1 text-[13px] font-bold tracking-tight text-left truncate">{cat.name}</span>
+                        <Layers size={12} className={cn("shrink-0", isActive ? "text-indigo-400" : "text-slate-700")} />
+                        <span className="flex-1 text-[13px] font-bold tracking-tight text-left whitespace-normal py-1 leading-tight">{cat.name}</span>
 
                         {(userRole === 'ADMIN' || userRole === 'ROOT_ADMIN') && (
                             <div className="flex items-center gap-1 opacity-0 group-hover/cat:opacity-100 transition-opacity mr-2 relative z-10">
