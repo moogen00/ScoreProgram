@@ -12,7 +12,7 @@ function cn(...inputs) {
 const AdminPanel = () => {
     const {
         scoringItems, addScoringItem, removeScoringItem, updateScoringItemOrder,
-        judgesByYear, addJudge, removeJudge,
+        judgesByYear, addJudge, removeJudge, anonymizeJudge,
         participants, addParticipant, removeParticipant, updateParticipant, moveParticipants,
         selectedCategoryId, years, scores,
         addCategory, updateCategory, deleteCategory, moveCategory, sortCategoriesByName, toggleYearLock,
@@ -83,6 +83,42 @@ const AdminPanel = () => {
         }
     };
 
+    const handleDeleteJudge = (yearId, email, name) => {
+        // Check if judge has scores in this year
+        let hasScores = false;
+
+        // Find categories for this year
+        const year = years.find(y => y.id === yearId);
+        if (year && year.categories) {
+            // Check all categories in this year
+            for (const cat of year.categories) {
+                const catScores = scores[cat.id];
+                if (catScores) {
+                    for (const pId in catScores) {
+                        const pScores = catScores[pId];
+                        // Check if this judge (email) has scored
+                        // Note: email in scores is used as key
+                        if (pScores[email.toLowerCase()]) {
+                            hasScores = true;
+                            break;
+                        }
+                    }
+                }
+                if (hasScores) break;
+            }
+        }
+
+        if (hasScores) {
+            if (window.confirm(`경고: ${name} 심사위원이 채점한 점수 정보가 있습니다!\n삭제 시 점수 보존을 위해 심사위원 이름만 '알수 없음'으로 변경됩니다.\n\n계속하시겠습니까? (점수는 유지됨)`)) {
+                anonymizeJudge(yearId, email);
+            }
+        } else {
+            if (window.confirm(`${name} 심사위원을 정말 삭제하시겠습니까?`)) {
+                removeJudge(yearId, email);
+            }
+        }
+    };
+
     const handleAddParticipant = (e) => {
         e.preventDefault();
         const number = newPNumber.trim();
@@ -127,6 +163,59 @@ const AdminPanel = () => {
         if (targetIndex < 0 || targetIndex >= newItems.length) return;
         [newItems[index], newItems[targetIndex]] = [newItems[targetIndex], newItems[index]];
         updateScoringItemOrder(newItems.map((item, i) => ({ ...item, order: i })));
+    };
+
+    const handleDeleteScoringItem = (itemId) => {
+        // Check if this item is used in any scores
+        let hasScores = false;
+
+        // Loop through all categories
+        for (const catId in scores) {
+            const catScores = scores[catId];
+            // Loop through all participants
+            for (const pId in catScores) {
+                const pScores = catScores[pId];
+                // Loop through all judges
+                for (const judgeEmail in pScores) {
+                    const itemScores = pScores[judgeEmail];
+                    if (itemScores && itemScores[itemId] !== undefined) {
+                        hasScores = true;
+                        break;
+                    }
+                }
+                if (hasScores) break;
+            }
+            if (hasScores) break;
+        }
+
+        if (hasScores) {
+            if (!window.confirm("채점 기준 삭제: 이 기준에 대한 모든 참가자의 채점 점수가 삭제될 수 있습니다.\n\n관리자가 최종 선택을 하셔야 합니다. 계속하시겠습니까?")) {
+                return;
+            }
+        } else {
+            if (!window.confirm("정말 이 채점 항목을 삭제하시겠습니까?")) {
+                return;
+            }
+        }
+        removeScoringItem(itemId);
+    };
+
+    const handleDeleteParticipant = (categoryId, pId) => {
+        // Check if participant has scores
+        const participantScores = scores[categoryId]?.[pId];
+        const hasScores = participantScores && Object.keys(participantScores).length > 0;
+
+        if (hasScores) {
+            if (!window.confirm("주의! 참가자에 대한 Score 정보가 있습니다.\n점수가 삭제될 수 있으니 주의하세요.\n\n정말 삭제하시겠습니까?")) {
+                return;
+            }
+        } else {
+            if (!window.confirm("정말 이 참가자를 삭제하시겠습니까?")) {
+                return;
+            }
+        }
+
+        removeParticipant(categoryId, pId);
     };
 
     const getScoredParticipants = useCallback((ps, catScores) => {
@@ -321,7 +410,7 @@ const AdminPanel = () => {
                                     <div className="flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
                                         <button onClick={() => move(index, -1)} disabled={index === 0} className="p-2 hover:bg-white/10 rounded-lg text-slate-400 disabled:opacity-10"><ArrowUp size={18} /></button>
                                         <button onClick={() => move(index, 1)} disabled={index === scoringItems.length - 1} className="p-2 hover:bg-white/10 rounded-lg text-slate-400 disabled:opacity-10"><ArrowDown size={18} /></button>
-                                        <button onClick={() => removeScoringItem(item.id)} className="p-2 hover:bg-rose-500/20 rounded-lg text-rose-400"><Trash2 size={18} /></button>
+                                        <button onClick={() => handleDeleteScoringItem(item.id)} className="p-2 hover:bg-rose-500/20 rounded-lg text-rose-400"><Trash2 size={18} /></button>
                                     </div>
                                 </div>
                             ))}
@@ -387,7 +476,7 @@ const AdminPanel = () => {
                                                     </div>
                                                     <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-all">
                                                         <button onClick={() => { setEditingPId(p.id); setEditPNumber(p.number); setEditPName(p.name); }} className="p-2 hover:bg-white/10 rounded-lg text-slate-400"><Settings size={14} /></button>
-                                                        <button onClick={() => removeParticipant(manageCatId, p.id)} className="p-2 hover:bg-rose-500/20 rounded-lg text-rose-400"><Trash2 size={16} /></button>
+                                                        <button onClick={() => handleDeleteParticipant(manageCatId, p.id)} className="p-2 hover:bg-rose-500/20 rounded-lg text-rose-400"><Trash2 size={16} /></button>
                                                     </div>
                                                 </>
                                             )}
@@ -542,7 +631,7 @@ const AdminPanel = () => {
                                                 <div className="w-10 h-10 rounded-full bg-amber-500/20 text-amber-500 flex items-center justify-center"><Shield size={20} /></div>
                                                 <div><p className="font-bold text-white">{j.name}</p><p className="text-xs text-slate-500">{j.email}</p></div>
                                             </div>
-                                            <button onClick={() => removeJudge(manageYearId, j.email)} className="p-2 opacity-0 group-hover:opacity-100 hover:bg-rose-500/20 rounded-lg text-rose-400 transition-all"><Trash2 size={18} /></button>
+                                            <button onClick={() => handleDeleteJudge(manageYearId, j.email, j.name)} className="p-2 opacity-0 group-hover:opacity-100 hover:bg-rose-500/20 rounded-lg text-rose-400 transition-all"><Trash2 size={18} /></button>
                                         </div>
                                     ))}
                                 </div>
@@ -683,7 +772,13 @@ const AdminPanel = () => {
                                     <div className="flex flex-col md:flex-row items-center justify-between gap-4">
                                         <p className="text-xs text-slate-400">모든 연도, 종목, 참가자, 점수 등 데이터베이스의 **모든 정보를 영구적으로 삭제**합니다.</p>
                                         <button
-                                            onClick={clearAllData}
+                                            onClick={() => {
+                                                if (window.confirm("경고: 모든 데이터가 삭제됩니다! (연도, 종목, 참가자, 점수 등)\n이 작업은 절대 되돌릴 수 없습니다.\n\n정말 초기화를 진행하시겠습니까?")) {
+                                                    if (window.confirm("마지막 경고입니다.\n\n정말로 모든 데이터를 영구적으로 삭제하시겠습니까?")) {
+                                                        clearAllData();
+                                                    }
+                                                }
+                                            }}
                                             disabled={isResetting}
                                             className="px-6 py-3 bg-white/5 border border-rose-500/30 text-rose-400 hover:bg-rose-500 hover:text-white rounded-xl text-xs font-bold transition-all whitespace-nowrap flex items-center gap-2"
                                         >

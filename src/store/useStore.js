@@ -550,6 +550,13 @@ const useStore = create((set, get) => ({
         await deleteDoc(doc(db, 'judges', `${yearId}_${email.toLowerCase()}`));
     },
 
+    anonymizeJudge: async (yearId, email) => {
+        const lowerEmail = email.toLowerCase();
+        const judgeRef = doc(db, 'judges', `${yearId}_${lowerEmail}`);
+        // Only update the name, keep everything else (email, yearId, submitted status)
+        await setDoc(judgeRef, { name: '알수 없음' }, { merge: true });
+    },
+
     // Admin Management Actions
     addAdmin: async (email, name) => {
         const lowerEmail = email.toLowerCase();
@@ -790,7 +797,8 @@ const useStore = create((set, get) => ({
     },
 
     clearAllData: async () => {
-        if (!confirm('주의: 데이터베이스의 모든 정보(연도, 종목, 참가자, 점수, 심사위원, 관리자)가 영구적으로 삭제됩니다. 계속하시겠습니까?')) return;
+        // Confirmation is handled in AdminPanel.jsx
+        // if (!confirm('주의: 데이터베이스의 모든 정보(연도, 종목, 참가자, 점수, 심사위원, 관리자)가 영구적으로 삭제됩니다. 계속하시겠습니까?')) return;
 
         set({ isResetting: true, resetStatus: '초기화 준비 중...' });
 

@@ -28,7 +28,8 @@ const Sidebar = ({ width, isOpen, onClose, onRequestLogout }) => {
         setCompetitionName,
         updateCategoriesOrder,
         reorderCategory,
-        toggleCategoryLock
+        toggleCategoryLock,
+        scores // Add scores to destructuring
     } = useStore();
 
     const [expandedYears, setExpandedYears] = useState({ '2025': true });
@@ -88,8 +89,25 @@ const Sidebar = ({ width, isOpen, onClose, onRequestLogout }) => {
 
     const handleDeleteYear = async (e, id) => {
         e.stopPropagation();
-        if (window.confirm('정말 이 연도의 모든 데이터를 삭제하시겠습니까?\n(참가자, 점수 결과 등 포함)')) {
-            await deleteYear(id);
+
+        // Check for scores in this year
+        const year = allYears.find(y => y.id === id);
+        let hasScores = false;
+        if (year && year.categories) {
+            hasScores = year.categories.some(cat => {
+                const catScores = scores[cat.id];
+                return catScores && Object.keys(catScores).length > 0;
+            });
+        }
+
+        if (hasScores) {
+            if (window.confirm('경고: 이 연도에 점수 데이터가 존재합니다.\n삭제 시 모든 참가자와 점수가 삭제됩니다.\n\n정말 삭제하시겠습니까? (관리자 최종 선택)')) {
+                await deleteYear(id);
+            }
+        } else {
+            if (window.confirm('정말 이 연도의 모든 데이터를 삭제하시겠습니까?\n(참가자, 점수 결과 등 포함)')) {
+                await deleteYear(id);
+            }
         }
     };
 
@@ -130,8 +148,18 @@ const Sidebar = ({ width, isOpen, onClose, onRequestLogout }) => {
     };
 
     const handleDeleteCategory = (yearId, catId, name) => {
-        if (window.confirm(`'${name}' 종목을 삭제하시겠습니까?`)) {
-            deleteCategory(yearId, catId);
+        // Check for scores in this category
+        const catScores = scores[catId];
+        const hasScores = catScores && Object.keys(catScores).length > 0;
+
+        if (hasScores) {
+            if (window.confirm(`경고: '${name}' 종목에 점수 데이터가 존재합니다.\n삭제 시 모든 참가자와 점수가 삭제됩니다.\n\n정말 삭제하시겠습니까? (관리자 최종 선택)`)) {
+                deleteCategory(yearId, catId);
+            }
+        } else {
+            if (window.confirm(`'${name}' 종목을 삭제하시겠습니까?`)) {
+                deleteCategory(yearId, catId);
+            }
         }
     };
 
