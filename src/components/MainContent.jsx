@@ -18,10 +18,8 @@ const MainContent = () => {
         const view = activeView;
 
         if (view === 'admin' && !isAdmin) {
-            // Security breach: Non-admin trying to access admin view
-            alert('비정상적인 접근이 감지되었습니다. 로그아웃 처리됩니다.');
-            logout();
-            return null;
+            // Graceful fallback: Redirect to dashboard if non-admin lands on admin view (e.g., via Back button)
+            return <Dashboard key="dashboard" />;
         }
 
         switch (view) {
