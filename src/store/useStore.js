@@ -353,6 +353,7 @@ const useStore = create((set, get) => ({
         const comp = {
             id,
             name,
+            locked: false,
             createdAt: new Date().toISOString(),
             categories: []
         };
@@ -443,7 +444,8 @@ const useStore = create((set, get) => ({
                 // Removed: year: yearVal,
                 genre,
                 category,
-                order: (data.categories?.length || 0)
+                order: (data.categories?.length || 0),
+                locked: false
             };
 
             const categories = [...(data.categories || []), newCategoryObj];
@@ -777,7 +779,7 @@ const useStore = create((set, get) => ({
 
             // 1. Clear existing data if mode is 'replace'
             if (mode === 'replace') {
-                const collections = ['years', 'participants', 'judges', 'scores', 'admins'];
+                const collections = ['competitions', 'years', 'participants', 'judges', 'scores', 'admins'];
                 for (const collName of collections) {
                     const snap = await getDocs(collection(db, collName));
                     snap.docs.forEach(doc => batch.delete(doc.ref));
@@ -943,6 +945,40 @@ const useStore = create((set, get) => ({
                     batch.set(doc(db, 'scores', correctId), { ...data, judgeEmail: lowerEmail });
                     updateCount++;
                 }
+            }
+        });
+
+        if (updateCount > 0) await batch.commit();
+        return updateCount;
+    },
+
+    fixLockedProperties: async () => {
+        const batch = writeBatch(db);
+        let updateCount = 0;
+        const compSnap = await getDocs(collection(db, 'competitions'));
+
+        compSnap.docs.forEach(docSnap => {
+            const data = docSnap.data();
+            let needsUpdate = false;
+            let updates = {};
+
+            if (data.locked === undefined) {
+                updates.locked = false;
+                needsUpdate = true;
+            }
+
+            const updatedCategories = (data.categories || []).map(cat => {
+                if (cat.locked === undefined) {
+                    needsUpdate = true;
+                    return { ...cat, locked: false };
+                }
+                return cat;
+            });
+
+            if (needsUpdate) {
+                updates.categories = updatedCategories;
+                batch.update(docSnap.ref, updates);
+                updateCount++;
             }
         });
 

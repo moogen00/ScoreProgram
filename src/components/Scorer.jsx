@@ -85,8 +85,8 @@ const Scorer = () => {
 
         let num = parseFloat(val);
         if (isNaN(num)) return;
-        if (num > 10) num = 10;
-        if (num < 0) num = 0;
+        if (num > 9.9) num = 9.9;
+        // if (num < 0) num = 0; // Removed min clamp during typing to allow 5.x entry
 
         setLocalScores(prev => ({
             ...prev,
@@ -414,8 +414,11 @@ const Scorer = () => {
                                             return (
                                                 <th key={item.id} className="px-2 py-4 text-center min-w-[70px]">
                                                     <div className="flex flex-col items-center justify-center leading-tight">
-                                                        <span className="text-indigo-200 mobile:text-xs font-bold text-sm">{mainLabel}</span>
-                                                        {subLabel && <span className="text-[10px] text-indigo-400/70 mt-0.5">{subLabel}</span>}
+                                                        <span className="text-indigo-200 mobile:text-xs font-bold text-sm mb-1.5">{mainLabel}</span>
+                                                        <span className="px-1.5 py-0.5 rounded bg-indigo-500/10 border border-indigo-500/20 text-[11px] font-bold text-indigo-300">
+                                                            5.5 ~ 9.9
+                                                        </span>
+                                                        {subLabel && <span className="text-[10px] text-indigo-400/70 mt-1">{subLabel}</span>}
                                                     </div>
                                                 </th>
                                             );
@@ -483,21 +486,24 @@ const Scorer = () => {
                                                             }
 
                                                             // Standard Input View (Judge / Admin-Judge)
-                                                            const isActive = localScores[p.id]?.[item.id] !== undefined && localScores[p.id]?.[item.id] !== '';
+                                                            const currentVal = localScores[p.id]?.[item.id];
+                                                            const isWarning = currentVal && parseFloat(currentVal) < 5.5;
+                                                            const isActive = currentVal !== undefined && currentVal !== '';
 
                                                             return (
                                                                 <td key={item.id} className="px-1 py-1">
                                                                     <div className={cn(
                                                                         "relative flex items-center justify-center w-full h-12 rounded-lg transition-all border",
                                                                         isActive ? "bg-indigo-500/10 border-indigo-500/30" : "bg-white/5 border-transparent",
-                                                                        isLocked && "opacity-40 grayscale-[0.5]"
+                                                                        isLocked && "opacity-40 grayscale-[0.5]",
+                                                                        isWarning && "border-rose-500/50 bg-rose-500/10"
                                                                     )}>
                                                                         <input
                                                                             type="number"
                                                                             inputMode="decimal"
                                                                             step="0.1"
-                                                                            min="0"
-                                                                            max="10"
+                                                                            min="5.5"
+                                                                            max="9.9"
                                                                             disabled={isLocked}
                                                                             value={localScores[p.id]?.[item.id] ?? ''}
                                                                             onChange={(e) => handleScoreChange(p.id, item.id, e.target.value)}
@@ -505,7 +511,8 @@ const Scorer = () => {
                                                                             className={cn(
                                                                                 "w-full h-full bg-transparent text-center font-mono font-bold text-lg outline-none placeholder-white/10",
                                                                                 isActive ? "text-indigo-400" : "text-white",
-                                                                                isLocked ? "cursor-not-allowed" : "focus:text-indigo-400"
+                                                                                isLocked ? "cursor-not-allowed" : "focus:text-indigo-400",
+                                                                                isWarning && "text-rose-400 focus:text-rose-400"
                                                                             )}
                                                                             placeholder="-"
                                                                         />
@@ -583,18 +590,28 @@ const Scorer = () => {
                                                             );
                                                         }
 
-                                                        // Judge Input View
-                                                        const isActive = localScores[p.id]?.[item.id] !== undefined && localScores[p.id]?.[item.id] !== '';
+                                                        const currentVal = localScores[p.id]?.[item.id];
+                                                        const isWarning = currentVal && parseFloat(currentVal) < 5.5;
+                                                        const isActive = currentVal !== undefined && currentVal !== '';
 
                                                         return (
                                                             <div key={item.id} className={cn(
                                                                 "relative rounded-xl border transition-all p-2 flex flex-col items-center",
                                                                 isActive ? "bg-indigo-500/10 border-indigo-500/30" : "bg-white/5 border-white/10",
-                                                                isDisabled && "opacity-30 pointer-events-none"
+                                                                isDisabled && "opacity-30 pointer-events-none",
+                                                                isWarning && "border-rose-500/50 bg-rose-500/10"
                                                             )}>
                                                                 <label className="text-xs text-indigo-300 font-bold mb-1 uppercase tracking-tight truncate w-full text-center bg-indigo-500/10 px-2 py-0.5 rounded-full">
                                                                     {item.label}
                                                                 </label>
+                                                                <div className={cn(
+                                                                    "mb-2 px-1.5 py-0.5 rounded text-[10px] font-bold border transition-colors",
+                                                                    isWarning
+                                                                        ? "bg-rose-500/20 border-rose-500/30 text-rose-400"
+                                                                        : "bg-indigo-500/5 border-indigo-500/10 text-slate-400"
+                                                                )}>
+                                                                    5.5 ~ 9.9
+                                                                </div>
                                                                 {isDisabled ? (
                                                                     <span className="text-slate-600 font-bold py-2">-</span>
                                                                 ) : (
@@ -603,8 +620,8 @@ const Scorer = () => {
                                                                             type="number"
                                                                             inputMode="decimal"
                                                                             step="0.1"
-                                                                            min="0"
-                                                                            max="10"
+                                                                            min="5.5"
+                                                                            max="9.9"
                                                                             disabled={isLocked}
                                                                             value={localScores[p.id]?.[item.id] ?? ''}
                                                                             onChange={(e) => handleScoreChange(p.id, item.id, e.target.value)}

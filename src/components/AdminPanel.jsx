@@ -18,7 +18,7 @@ const AdminPanel = () => {
         addCategory, updateCategory, deleteCategory, moveCategory, sortCategoriesByName, toggleCompetitionLock,
         admins, addAdmin, removeAdmin, competitionName, setCompetitionName,
         seedRandomScores, clearCompetitionScores,
-        exportData, importData, clearAllData,
+        exportData, importData, clearAllData, normalizeDatabase, fixLockedProperties,
         currentUser,
         adminTab, setAdminTab,
         isResetting, resetStatus, isExporting
@@ -760,6 +760,22 @@ const AdminPanel = () => {
                                     className="w-full py-4 bg-amber-600 hover:bg-amber-500 text-white rounded-xl font-bold flex items-center justify-center gap-2 transition-all"
                                 >
                                     <RefreshCcw size={20} /> 데이터 대소문자 변환 (Case Normalization)
+                                </button>
+
+                                <button
+                                    onClick={async () => {
+                                        if (confirm('모든 대회와 종목에 잠금(Locked) 속성을 초기화하시겠습니까? (없는 경우에만 False로 설정됨)')) {
+                                            try {
+                                                const count = await fixLockedProperties();
+                                                alert(`작업 완료: ${count}개의 대회가 수정되었습니다.`);
+                                            } catch (e) {
+                                                alert(`오류 발생: ${e.message}`);
+                                            }
+                                        }
+                                    }}
+                                    className="w-full py-4 mt-4 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl font-bold flex items-center justify-center gap-2 transition-all"
+                                >
+                                    <Lock size={20} /> 잠금 데이터 복구 (Fix Locked Data)
                                 </button>
                             </div>
 
