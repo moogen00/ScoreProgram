@@ -9,7 +9,7 @@ function cn(...inputs) {
 }
 
 const Scorer = () => {
-    const { scoringItems, updateScore, submitCategoryScores, toggleJudgeSubmission, selectedCategoryId, scores, participants, currentUser, years, judgesByYear, isInitialSyncComplete } = useStore();
+    const { scoringItems, updateScore, submitCategoryScores, toggleJudgeSubmission, selectedCategoryId, scores, participants, currentUser, competitions, judgesByComp, isInitialSyncComplete } = useStore();
 
     console.log(`[Scorer] Rendering. Category: ${selectedCategoryId}, Participants count: ${participants[selectedCategoryId]?.length || 0}`);
     if (participants[selectedCategoryId]) {
@@ -22,26 +22,26 @@ const Scorer = () => {
     const [isSaving, setIsSaving] = useState(false);
 
     // Initial check logic
-    const currentYear = useMemo(() => years.find(y => y.categories?.some(c => c.id === selectedCategoryId)), [years, selectedCategoryId]);
-    const currentYearId = currentYear?.id;
-    const categoryName = useMemo(() => currentYear?.categories?.find(c => c.id === selectedCategoryId)?.name || '', [currentYear, selectedCategoryId]);
+    const currentComp = useMemo(() => competitions.find(y => y.categories?.some(c => c.id === selectedCategoryId)), [competitions, selectedCategoryId]);
+    const currentCompId = currentComp?.id;
+    const categoryName = useMemo(() => currentComp?.categories?.find(c => c.id === selectedCategoryId)?.name || '', [currentComp, selectedCategoryId]);
     const isSolo = useMemo(() => categoryName.toUpperCase().includes('SOLO'), [categoryName]);
 
     // Auth & Lock logic
-    const isYearLocked = currentYear?.locked;
-    const isCategoryLocked = currentYear?.categories?.find(c => c.id === selectedCategoryId)?.locked;
+    const isCompLocked = currentComp?.locked;
+    const isCategoryLocked = currentComp?.categories?.find(c => c.id === selectedCategoryId)?.locked;
     const isAdmin = currentUser?.role === 'ADMIN' || currentUser?.role === 'ROOT_ADMIN';
     const isJudge = currentUser?.role === 'JUDGE';
     const isSpectator = currentUser?.role === 'SPECTATOR';
-    const isJudgeForThisYear = judgesByYear[currentYearId]?.some(j => j.email === currentUser?.email);
+    const isJudgeForThisComp = judgesByComp[currentCompId]?.some(j => j.email === currentUser?.email);
 
-    const myJudgeRecord = useMemo(() => judgesByYear[currentYearId]?.find(j => j.email === currentUser?.email), [judgesByYear, currentYearId, currentUser]);
+    const myJudgeRecord = useMemo(() => judgesByComp[currentCompId]?.find(j => j.email === currentUser?.email), [judgesByComp, currentCompId, currentUser]);
     const isSubmitted = myJudgeRecord?.submittedCategories?.[selectedCategoryId] || false;
 
     // Auth: Everyone can view, but only Admin/Assigned Judge can edit
     const isAuthorized = true;
     const canEdit = isAdmin || isJudge;
-    const isGlobalLocked = isYearLocked || isCategoryLocked;
+    const isGlobalLocked = isCompLocked || isCategoryLocked;
     // Lock if Global Lock is ON, OR if Submitted (and not Admin)
     // Admin is immune to Submission Lock (can edit anytime), but subject to Global Lock if we want strictness? 
     // Usually Admin can override all, but let's respect Global Lock for visual consistency, or allow Admin override.
@@ -55,7 +55,7 @@ const Scorer = () => {
         role: currentUser?.role,
         isSpectator,
         isLocked,
-        isYearLocked,
+        isCompLocked,
         isCategoryLocked,
         selectedCategoryId
     });
@@ -98,6 +98,10 @@ const Scorer = () => {
         if (isGlobalLocked && !isAdmin) return; // Cannot toggle if globally locked
 
         setIsSaving(true);
+
+        // Safety timeout to prevent infinite processing state
+        const safetyTimer = setTimeout(() => setIsSaving(false), 5000);
+
         try {
             if (isSubmitted) {
                 // Currently Submitted -> Unlock (Edit Mode)
@@ -110,6 +114,7 @@ const Scorer = () => {
             console.error("Toggle Submit failed", e);
             alert("처리 중 오류가 발생했습니다.");
         } finally {
+            clearTimeout(safetyTimer);
             setIsSaving(false);
         }
     };
@@ -127,7 +132,7 @@ const Scorer = () => {
     const getParticipantTotal = useCallback((pId) => {
         // Condition: Admin (Monitoring) OR Spectator (Locked) OR Admin (Locked - rare)
         // Basically if we are showing averages, we calculate total from averages.
-        if ((isAdmin && !isJudgeForThisYear) || (isSpectator && isLocked)) {
+        if ((isAdmin && !isJudgeForThisComp) || (isSpectator && isLocked)) {
             // Calculate Average Total from all judges
             const pScoresByJudge = scores[selectedCategoryId]?.[pId] || {};
             const judgeEmails = Object.keys(pScoresByJudge);
@@ -144,12 +149,12 @@ const Scorer = () => {
             // Judge: Use local/own total
             return parseFloat(calculateTotal(pId));
         }
-    }, [isAdmin, isSpectator, isLocked, isJudgeForThisYear, scores, selectedCategoryId, calculateTotal]);
+    }, [isAdmin, isSpectator, isLocked, isJudgeForThisComp, scores, selectedCategoryId, calculateTotal]);
 
     // Helper for Admin View
     const getAdminItemStats = useCallback((pId, itemId) => {
         const pScoresByJudge = scores[selectedCategoryId]?.[pId] || {};
-        const yearJudges = judgesByYear?.[currentYearId] || [];
+        const compJudges = judgesByComp?.[currentCompId] || [];
         const judgeEmails = Object.keys(pScoresByJudge);
         const stats = { avg: 0, breakdown: [] };
 
@@ -166,7 +171,7 @@ const Scorer = () => {
 
                 // Find judge name
                 let judgeName = email.split('@')[0];
-                const judgeObj = yearJudges.find(j => j.email === email);
+                const judgeObj = compJudges.find(j => j.email === email);
                 if (judgeObj) judgeName = judgeObj.name;
 
                 stats.breakdown.push({ name: judgeName, score: num });
@@ -177,7 +182,7 @@ const Scorer = () => {
             stats.avg = sum / count;
         }
         return stats;
-    }, [scores, selectedCategoryId, judgesByYear, currentYearId]);
+    }, [scores, selectedCategoryId, judgesByComp, currentCompId]);
 
     // Helper for Spectator Item View
     const getAverageItemScore = useCallback((pId, itemId) => {
@@ -440,7 +445,7 @@ const Scorer = () => {
                                                         <td className="sticky left-16 z-10 bg-[#0f172a]/95 backdrop-blur-sm px-4 py-3 shadow-[4px_0_10px_rgba(0,0,0,0.3)] group-hover:bg-[#151e32]/95 transition-colors text-xs">
                                                             <div className="flex items-center gap-2">
                                                                 <div className="font-bold text-white text-base truncate max-w-[150px]">{p.name}</div>
-                                                                {((isAdmin && !isJudgeForThisYear) || (isSpectator && isLocked)) && (
+                                                                {((isAdmin && !isJudgeForThisComp) || (isSpectator && isLocked)) && (
                                                                     <span className="text-[12px] font-black px-2 py-0.5 rounded bg-rose-500/20 text-rose-400 border border-rose-500/30 shadow-[0_0_10px_rgba(244,63,94,0.3)]">
                                                                         R{p.rank}
                                                                     </span>
@@ -461,7 +466,7 @@ const Scorer = () => {
                                                             }
 
                                                             // Spectator View (Locked) OR Admin Monitoring View
-                                                            if ((isSpectator && isLocked) || (isAdmin && !isJudgeForThisYear)) {
+                                                            if ((isSpectator && isLocked) || (isAdmin && !isJudgeForThisComp)) {
                                                                 const avgScore = getAverageItemScore(p.id, item.id);
                                                                 return (
                                                                     <td key={item.id} className="px-1 py-1">
@@ -547,7 +552,7 @@ const Scorer = () => {
                                                             {p.number}
                                                         </div>
                                                         <span className="font-bold text-white truncate max-w-[120px]">{p.name}</span>
-                                                        {((isAdmin && !isJudgeForThisYear) || (isSpectator && isLocked)) && (
+                                                        {((isAdmin && !isJudgeForThisComp) || (isSpectator && isLocked)) && (
                                                             <span className="text-[12px] font-black px-2 py-0.5 rounded bg-rose-500/20 text-rose-400 border border-rose-500/30 shadow-[0_0_10px_rgba(244,63,94,0.3)]">
                                                                 R{p.rank}
                                                             </span>
@@ -566,7 +571,7 @@ const Scorer = () => {
                                                         const isDisabled = (isSolo && isTeamwork);
 
                                                         // Spectator/Monitoring View logic
-                                                        if ((isSpectator && isLocked) || (isAdmin && !isJudgeForThisYear)) {
+                                                        if ((isSpectator && isLocked) || (isAdmin && !isJudgeForThisComp)) {
                                                             const avgScore = getAverageItemScore(p.id, item.id);
                                                             return (
                                                                 <div key={item.id} className="bg-black/20 rounded-lg p-2 border border-white/5 flex flex-col items-center">
@@ -654,11 +659,11 @@ const Scorer = () => {
                                 <tbody>
                                     {[...rankedParticipants].sort((a, b) => parseInt(a.number || 0, 10) - parseInt(b.number || 0, 10)).map((p, pIdx) => {
                                         const pScoresByJudge = scores[selectedCategoryId]?.[p.id] || {};
-                                        const yearJudges = judgesByYear?.[currentYearId] || [];
+                                        const compJudges = judgesByComp?.[currentCompId] || [];
 
-                                        if (yearJudges.length === 0) return null;
+                                        if (compJudges.length === 0) return null;
 
-                                        return yearJudges.map((j, jIdx) => {
+                                        return compJudges.map((j, jIdx) => {
                                             const vals = pScoresByJudge[j.email] || {};
                                             const judgeTotal = Object.keys(vals).length > 0
                                                 ? Object.values(vals).reduce((s, v) => s + (parseFloat(v) || 0), 0).toFixed(1)
@@ -667,14 +672,14 @@ const Scorer = () => {
                                             return (
                                                 <tr key={`${p.id}-${j.email}`} className={cn(
                                                     "hover:bg-white/[0.02] transition-colors",
-                                                    jIdx === yearJudges.length - 1 && pIdx !== participantsSortedByNumber.length - 1 ? "border-b-2 border-white/20" : "border-b border-white/5"
+                                                    jIdx === compJudges.length - 1 && pIdx !== participantsSortedByNumber.length - 1 ? "border-b-2 border-white/20" : "border-b border-white/5"
                                                 )}>
                                                     {jIdx === 0 && (
                                                         <>
-                                                            <td rowSpan={yearJudges.length} className="px-4 py-4 text-center font-black text-slate-300 text-lg border-r border-white/10 bg-slate-900/40">
+                                                            <td rowSpan={compJudges.length} className="px-4 py-4 text-center font-black text-slate-300 text-lg border-r border-white/10 bg-slate-900/40">
                                                                 {p.number}
                                                             </td>
-                                                            <td rowSpan={yearJudges.length} className="px-4 py-4 font-bold text-white border-r border-white/10 bg-slate-900/40 text-center">
+                                                            <td rowSpan={compJudges.length} className="px-4 py-4 font-bold text-white border-r border-white/10 bg-slate-900/40 text-center">
                                                                 {p.name}
                                                             </td>
                                                         </>

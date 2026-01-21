@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { GoogleLogin } from '@react-oauth/google';
 import { jwtDecode } from 'jwt-decode';
 import { signInAnonymously } from 'firebase/auth';
@@ -8,7 +8,8 @@ import { Trophy, LogIn, Users } from 'lucide-react';
 import { motion } from 'framer-motion';
 
 const LoginPage = () => {
-    const { login, admins, judgesByYear } = useStore();
+    const { login, admins, judgesByComp } = useStore();
+    const [email, setEmail] = useState('');
 
     const handleSuccess = (credentialResponse) => {
         const decoded = jwtDecode(credentialResponse.credential);
@@ -18,7 +19,7 @@ const LoginPage = () => {
         const rootAdmins = (import.meta.env.VITE_ROOT_ADMIN_EMAILS || '').split(',').map(e => e.trim());
         const isRootAdmin = rootAdmins.includes(email);
         const isAdmin = isRootAdmin || Object.values(admins || {}).some(a => a.email === email);
-        const isJudge = Object.values(judgesByYear || {}).some(yearJudges => yearJudges.some(j => j.email === email));
+        const isJudge = Object.values(judgesByComp || {}).some(compJudges => compJudges.some(j => j.email === email));
 
         // Strict Check: Enforce strictly in Production, allow loose access in Dev
         // Strict Check: Enforce strictly in Production, allow loose access in Dev

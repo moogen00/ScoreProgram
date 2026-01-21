@@ -12,12 +12,12 @@ function cn(...inputs) {
 const AdminPanel = () => {
     const {
         scoringItems, addScoringItem, removeScoringItem, updateScoringItemOrder,
-        judgesByYear, addJudge, removeJudge, anonymizeJudge,
+        judgesByComp, addJudge, removeJudge, anonymizeJudge,
         participants, addParticipant, removeParticipant, updateParticipant, moveParticipants,
-        selectedCategoryId, years, scores,
-        addCategory, updateCategory, deleteCategory, moveCategory, sortCategoriesByName, toggleYearLock,
+        selectedCategoryId, competitions, scores,
+        addCategory, updateCategory, deleteCategory, moveCategory, sortCategoriesByName, toggleCompetitionLock,
         admins, addAdmin, removeAdmin, competitionName, setCompetitionName,
-        seedRandomScores, clearYearScores,
+        seedRandomScores, clearCompetitionScores,
         exportData, importData, clearAllData,
         currentUser,
         adminTab, setAdminTab,
@@ -32,7 +32,7 @@ const AdminPanel = () => {
     const [newPName, setNewPName] = useState('');
 
     // Management Selection states
-    const [manageYearId, setManageYearId] = useState('');
+    const [manageCompId, setManageCompId] = useState('');
     const [manageCatId, setManageCatId] = useState('');
 
     // Hierarchy Management states
@@ -58,13 +58,13 @@ const AdminPanel = () => {
 
     // Find info for current category
     const findCatInfo = () => {
-        for (const year of years) {
-            const cat = (year.categories || []).find(c => c.id === selectedCategoryId);
-            if (cat) return { yearName: year.name, catName: cat.name };
+        for (const comp of competitions) {
+            const cat = (comp.categories || []).find(c => c.id === selectedCategoryId);
+            if (cat) return { compName: comp.name, catName: cat.name };
         }
-        return { yearName: '?', catName: 'None' };
+        return { compName: '?', catName: 'None' };
     };
-    const { yearName, catName } = findCatInfo();
+    const { compName, catName } = findCatInfo();
 
     const handleAddScoring = (e) => {
         e.preventDefault();
@@ -76,22 +76,22 @@ const AdminPanel = () => {
 
     const handleAddJudge = (e) => {
         e.preventDefault();
-        if (manageYearId && newJudgeEmail.trim() && newJudgeName.trim()) {
-            addJudge(manageYearId, newJudgeEmail.trim(), newJudgeName.trim());
+        if (manageCompId && newJudgeEmail.trim() && newJudgeName.trim()) {
+            addJudge(manageCompId, newJudgeEmail.trim(), newJudgeName.trim());
             setNewJudgeEmail('');
             setNewJudgeName('');
         }
     };
 
-    const handleDeleteJudge = (yearId, email, name) => {
-        // Check if judge has scores in this year
+    const handleDeleteJudge = (compId, email, name) => {
+        // Check if judge has scores in this competition
         let hasScores = false;
 
-        // Find categories for this year
-        const year = years.find(y => y.id === yearId);
-        if (year && year.categories) {
-            // Check all categories in this year
-            for (const cat of year.categories) {
+        // Find categories for this competition
+        const comp = competitions.find(y => y.id === compId);
+        if (comp && comp.categories) {
+            // Check all categories in this competition
+            for (const cat of comp.categories) {
                 const catScores = scores[cat.id];
                 if (catScores) {
                     for (const pId in catScores) {
@@ -110,11 +110,11 @@ const AdminPanel = () => {
 
         if (hasScores) {
             if (window.confirm(`경고: ${name} 심사위원이 채점한 점수 정보가 있습니다!\n삭제 시 점수 보존을 위해 심사위원 이름만 '알수 없음'으로 변경됩니다.\n\n계속하시겠습니까? (점수는 유지됨)`)) {
-                anonymizeJudge(yearId, email);
+                anonymizeJudge(compId, email);
             }
         } else {
             if (window.confirm(`${name} 심사위원을 정말 삭제하시겠습니까?`)) {
-                removeJudge(yearId, email);
+                removeJudge(compId, email);
             }
         }
     };
@@ -257,13 +257,13 @@ const AdminPanel = () => {
         return getScoredParticipants(ps, catScores);
     }, [participants, scores, manageCatId, getScoredParticipants]);
 
-    const getYearParticipants = useCallback(() => {
-        if (!manageYearId) return [];
-        const year = years.find(y => y.id === manageYearId);
-        if (!year) return [];
+    const getCompParticipants = useCallback(() => {
+        if (!manageCompId) return [];
+        const comp = competitions.find(y => y.id === manageCompId);
+        if (!comp) return [];
 
         const all = [];
-        (year.categories || []).forEach(cat => {
+        (comp.categories || []).forEach(cat => {
             const catPs = participants[cat.id] || [];
             const catScores = scores[cat.id] || {};
             const rankedPs = getScoredParticipants(catPs, catScores);
@@ -282,22 +282,22 @@ const AdminPanel = () => {
         }
 
         const sortedByAvg = [...all].sort((a, b) => b.average - a.average);
-        const yearRankMap = new Map();
+        const compRankMap = new Map();
         let currentRank = 1;
         sortedByAvg.forEach((p, idx) => {
             if (idx > 0 && p.average < sortedByAvg[idx - 1].average) {
                 currentRank = idx + 1;
             }
-            yearRankMap.set(`${p.categoryId}_${p.id}`, p.average > 0 ? currentRank : '-');
+            compRankMap.set(`${p.categoryId}_${p.id}`, p.average > 0 ? currentRank : '-');
         });
 
         return all.map(p => ({
             ...p,
-            yearRank: yearRankMap.get(`${p.categoryId}_${p.id}`)
+            compRank: compRankMap.get(`${p.categoryId}_${p.id}`)
         }));
-    }, [manageYearId, years, participants, scores, sortConfig, getScoredParticipants]);
+    }, [manageCompId, competitions, participants, scores, sortConfig, getScoredParticipants]);
 
-    const yearAllParticipants = useMemo(() => getYearParticipants(), [getYearParticipants]);
+    const compAllParticipants = useMemo(() => getCompParticipants(), [getCompParticipants]);
 
     const handleSort = () => {
         setSortConfig(prev => ({
@@ -307,13 +307,13 @@ const AdminPanel = () => {
     };
 
     const getOrphanParticipants = () => {
-        const allCatIds = new Set(years.flatMap(y => (y.categories || []).map(c => c.id)));
+        const allCatIds = new Set(competitions.flatMap(y => (y.categories || []).map(c => c.id)));
         const orphaned = [];
         Object.keys(participants).forEach(catId => {
             if (!allCatIds.has(catId)) {
                 participants[catId].forEach(p => {
-                    const yearName = catId.split('-')[0] || '?';
-                    orphaned.push({ ...p, oldCategoryId: catId, yearName });
+                    const compNamePrefix = catId.split('-')[0] || '?';
+                    orphaned.push({ ...p, oldCategoryId: catId, compNamePrefix });
                 });
             }
         });
@@ -362,8 +362,8 @@ const AdminPanel = () => {
                             key={tab.id}
                             onClick={() => {
                                 setAdminTab(tab.id);
-                                if ((tab.id === 'participants' || tab.id === 'all_participants' || tab.id === 'judges') && !manageYearId && years.length > 0) {
-                                    setManageYearId(years[0].id);
+                                if ((tab.id === 'participants' || tab.id === 'all_participants' || tab.id === 'judges') && !manageCompId && competitions.length > 0) {
+                                    setManageCompId(competitions[0].id);
                                 }
                             }}
                             className={cn(
@@ -426,13 +426,13 @@ const AdminPanel = () => {
                                 <h2 className="text-xl font-bold text-white">참가자 명단 관리</h2>
                             </div>
                             <div className="flex flex-col sm:flex-row gap-2">
-                                <select value={manageYearId} onChange={(e) => { setManageYearId(e.target.value); setManageCatId(''); }} className="bg-black/40 border border-white/10 rounded-xl px-4 py-2 text-white text-xs outline-none">
-                                    <option value="">대회 연도 선택</option>
-                                    {years.map(y => <option key={y.id} value={y.id}>{y.name}</option>)}
+                                <select value={manageCompId} onChange={(e) => { setManageCompId(e.target.value); setManageCatId(''); }} className="bg-black/40 border border-white/10 rounded-xl px-4 py-2 text-white text-xs outline-none">
+                                    <option value="">대회 선택</option>
+                                    {competitions.map(y => <option key={y.id} value={y.id}>{y.name}</option>)}
                                 </select>
-                                <select value={manageCatId} onChange={(e) => setManageCatId(e.target.value)} disabled={!manageYearId} className="bg-black/40 border border-white/10 rounded-xl px-4 py-2 text-white text-xs outline-none disabled:opacity-30">
+                                <select value={manageCatId} onChange={(e) => setManageCatId(e.target.value)} disabled={!manageCompId} className="bg-black/40 border border-white/10 rounded-xl px-4 py-2 text-white text-xs outline-none disabled:opacity-30">
                                     <option value="">종목 선택</option>
-                                    {years.find(y => y.id === manageYearId)?.categories?.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                                    {competitions.find(y => y.id === manageCompId)?.categories?.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
                                 </select>
                             </div>
                         </div>
@@ -500,13 +500,13 @@ const AdminPanel = () => {
                                 <Layout className="text-indigo-400" />
                                 <h2 className="text-xl font-bold text-white">전체 참가자 현황</h2>
                             </div>
-                            <select value={manageYearId} onChange={(e) => setManageYearId(e.target.value)} className="bg-black/40 border border-white/10 rounded-xl px-4 py-2 text-white text-xs outline-none">
-                                <option value="">대회 연도 선택</option>
-                                {years.map(y => <option key={y.id} value={y.id}>{y.name}</option>)}
+                            <select value={manageCompId} onChange={(e) => setManageCompId(e.target.value)} className="bg-black/40 border border-white/10 rounded-xl px-4 py-2 text-white text-xs outline-none">
+                                <option value="">대회 선택</option>
+                                {competitions.map(y => <option key={y.id} value={y.id}>{y.name}</option>)}
                             </select>
                         </div>
 
-                        {manageYearId ? (
+                        {manageCompId ? (
                             <div className="overflow-x-auto custom-scrollbar rounded-xl border border-white/5 bg-black/20">
                                 <table className="w-full text-left border-collapse min-w-[600px]">
                                     <thead>
@@ -517,8 +517,8 @@ const AdminPanel = () => {
                                         </tr>
                                     </thead>
                                     <tbody className="divide-y divide-white/5">
-                                        {yearAllParticipants.length > 0 ? (
-                                            yearAllParticipants.map((p, index) => (
+                                        {compAllParticipants.length > 0 ? (
+                                            compAllParticipants.map((p, index) => (
                                                 <tr key={`${p.categoryId}_${p.id}`} className="hover:bg-white/[0.02] transition-colors">
                                                     <td className="px-6 py-5 text-center font-black text-slate-600">{index + 1}</td>
                                                     <td className="px-6 py-5">
@@ -582,8 +582,8 @@ const AdminPanel = () => {
                                             className="bg-slate-800 border border-white/20 rounded-lg px-3 py-2 text-xs text-white outline-none w-full sm:w-48"
                                         >
                                             <option value="">복구 대상 종목 선택</option>
-                                            {years.map(y => (
-                                                <optgroup key={y.id} label={`${y.name}년`}>
+                                            {competitions.map(y => (
+                                                <optgroup key={y.id} label={`${y.name}`}>
                                                     {(y.categories || []).map(c => (
                                                         <option key={c.id} value={c.id}>{c.name}</option>
                                                     ))}
@@ -611,13 +611,13 @@ const AdminPanel = () => {
                                 <Shield className="text-amber-400" />
                                 <h2 className="text-xl font-bold text-white">심사위원 보안 관리</h2>
                             </div>
-                            <select value={manageYearId} onChange={(e) => setManageYearId(e.target.value)} className="bg-black/40 border border-white/10 rounded-xl px-4 py-2 text-white text-xs outline-none">
-                                <option value="">대회 연도 선택</option>
-                                {years.map(y => <option key={y.id} value={y.id}>{y.name}</option>)}
+                            <select value={manageCompId} onChange={(e) => setManageCompId(e.target.value)} className="bg-black/40 border border-white/10 rounded-xl px-4 py-2 text-white text-xs outline-none">
+                                <option value="">대회 선택</option>
+                                {competitions.map(y => <option key={y.id} value={y.id}>{y.name}</option>)}
                             </select>
                         </div>
 
-                        {manageYearId ? (
+                        {manageCompId ? (
                             <>
                                 <form onSubmit={handleAddJudge} className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">
                                     <input type="email" value={newJudgeEmail} onChange={(e) => setNewJudgeEmail(e.target.value)} placeholder="구글 이메일" className="bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-white outline-none" />
@@ -625,13 +625,13 @@ const AdminPanel = () => {
                                     <button type="submit" className="bg-amber-600 hover:bg-amber-500 text-white py-3 rounded-xl font-bold flex items-center justify-center gap-2 transition-all hover:scale-[1.02]"><Shield size={20} /> 권한 부여</button>
                                 </form>
                                 <div className="space-y-3">
-                                    {(judgesByYear[manageYearId] || []).map(j => (
+                                    {(judgesByComp[manageCompId] || []).map(j => (
                                         <div key={j.email} className="flex items-center justify-between p-4 bg-white/5 border border-white/10 rounded-xl group">
                                             <div className="flex items-center gap-4">
                                                 <div className="w-10 h-10 rounded-full bg-amber-500/20 text-amber-500 flex items-center justify-center"><Shield size={20} /></div>
                                                 <div><p className="font-bold text-white">{j.name}</p><p className="text-xs text-slate-500">{j.email}</p></div>
                                             </div>
-                                            <button onClick={() => handleDeleteJudge(manageYearId, j.email, j.name)} className="p-2 opacity-0 group-hover:opacity-100 hover:bg-rose-500/20 rounded-lg text-rose-400 transition-all"><Trash2 size={18} /></button>
+                                            <button onClick={() => handleDeleteJudge(manageCompId, j.email, j.name)} className="p-2 opacity-0 group-hover:opacity-100 hover:bg-rose-500/20 rounded-lg text-rose-400 transition-all"><Trash2 size={18} /></button>
                                         </div>
                                     ))}
                                 </div>

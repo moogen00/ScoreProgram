@@ -11,19 +11,19 @@ function cn(...inputs) {
 
 const Sidebar = ({ width, isOpen, onClose, onRequestLogout }) => {
     const {
-        years: allYears, // Rename to allYears to avoid conflict with visibleYears logic
+        competitions: allCompetitions,
         selectedCategoryId,
         setSelectedCategoryId,
         activeView,
         setActiveView,
         currentUser,
-        addYear,
-        updateYear,
-        deleteYear,
+        addCompetition,
+        updateCompetition,
+        deleteCompetition,
         addCategory,
         updateCategory,
         deleteCategory,
-        toggleYearLock,
+        toggleCompetitionLock,
         competitionName,
         setCompetitionName,
         updateCategoriesOrder,
@@ -32,26 +32,27 @@ const Sidebar = ({ width, isOpen, onClose, onRequestLogout }) => {
         scores // Add scores to destructuring
     } = useStore();
 
-    const [expandedYears, setExpandedYears] = useState({ '2025': true });
+    const [expandedCompetitions, setExpandedCompetitions] = useState({ 'active': true });
 
     // Inline editing states
     const [isEditingComp, setIsEditingComp] = useState(false);
     const [tempCompName, setTempCompName] = useState(competitionName);
 
-    const [editingYearId, setEditingYearId] = useState(null);
-    const [tempYearName, setTempYearName] = useState('');
+    const [editingCompId, setEditingCompId] = useState(null);
+    const [tempCompIdName, setTempCompIdName] = useState('');
 
-    const [isAddingYear, setIsAddingYear] = useState(false);
-    const [newYearName, setNewYearName] = useState('');
+    const [isAddingCompetition, setIsAddingCompetition] = useState(false);
+    const [newCompetitionName, setNewCompetitionName] = useState('');
 
-    const [addingCatFor, setAddingCatFor] = useState(null); // yearId
+    const [addingCatFor, setAddingCatFor] = useState(null); // compId
     const [newCatName, setNewCatName] = useState('');
 
     const [editingCatId, setEditingCatId] = useState(null);
     const [tempCatName, setTempCatName] = useState('');
+    const isDeletingRef = React.useRef(false);
 
-    const toggleYear = (id) => {
-        setExpandedYears(prev => ({ ...prev, [id]: !prev[id] }));
+    const toggleCompetition = (id) => {
+        setExpandedCompetitions(prev => ({ ...prev, [id]: !prev[id] }));
     };
 
     const handleSaveCompName = () => {
@@ -61,76 +62,87 @@ const Sidebar = ({ width, isOpen, onClose, onRequestLogout }) => {
         }
     };
 
-    const handleSaveYearName = (id) => {
-        if (tempYearName.trim()) {
-            updateYear(id, tempYearName.trim());
-            setEditingYearId(null);
+    const handleSaveCompIdName = (id) => {
+        if (tempCompIdName.trim()) {
+            updateCompetition(id, tempCompIdName.trim());
+            setEditingCompId(null);
         }
     };
 
-    const handleAddYear = (e) => {
+    const handleAddCompetition = (e) => {
         if (e.key === 'Enter' || e.type === 'click') {
-            if (newYearName.trim()) {
-                addYear(newYearName.trim());
-                setNewYearName('');
-                setIsAddingYear(false);
+            if (newCompetitionName.trim()) {
+                addCompetition(newCompetitionName.trim());
+                setNewCompetitionName('');
+                setIsAddingCompetition(false);
             }
         }
     };
 
-    const handleAddCategory = (yearId) => {
+    const handleAddCategory = (compId) => {
         if (newCatName.trim()) {
-            addCategory(yearId, newCatName.trim());
+            addCategory(compId, newCatName.trim());
             setNewCatName('');
             setAddingCatFor(null);
-            if (!expandedYears[yearId]) toggleYear(yearId);
+            if (!expandedCompetitions[compId]) toggleCompetition(compId);
         }
     };
 
-    const handleDeleteYear = async (e, id) => {
-        e.stopPropagation();
+    const handleDeleteCompetition = async (e, id) => {
+        if (e) {
+            e.stopPropagation();
+            e.preventDefault();
+        }
+        if (isDeletingRef.current) return;
 
-        // Check for scores in this year
-        const year = allYears.find(y => y.id === id);
+        // Check for scores in this competition
+        const comp = allCompetitions.find(y => y.id === id);
         let hasScores = false;
-        if (year && year.categories) {
-            hasScores = year.categories.some(cat => {
+        if (comp && comp.categories) {
+            hasScores = comp.categories.some(cat => {
                 const catScores = scores[cat.id];
                 return catScores && Object.keys(catScores).length > 0;
             });
         }
 
-        if (hasScores) {
-            if (window.confirm('경고: 이 연도에 점수 데이터가 존재합니다.\n삭제 시 모든 참가자와 점수가 삭제됩니다.\n\n정말 삭제하시겠습니까? (관리자 최종 선택)')) {
-                await deleteYear(id);
+        isDeletingRef.current = true;
+        try {
+            if (hasScores) {
+                if (window.confirm('경고: 이 대회에 점수 데이터가 존재합니다.\n삭제 시 모든 참가자와 점수가 삭제됩니다.\n\n정말 삭제하시겠습니까? (관리자 최종 선택)')) {
+                    await deleteCompetition(id);
+                }
+            } else {
+                if (window.confirm('정말 이 대회의 모든 데이터를 삭제하시겠습니까?\n(참가자, 점수 결과 등 포함)')) {
+                    await deleteCompetition(id);
+                }
             }
-        } else {
-            if (window.confirm('정말 이 연도의 모든 데이터를 삭제하시겠습니까?\n(참가자, 점수 결과 등 포함)')) {
-                await deleteYear(id);
-            }
+        } catch (err) {
+            console.error('Error deleting competition:', err);
+        } finally {
+            isDeletingRef.current = false;
         }
     };
 
-    const handleToggleYearLock = async (e, year) => {
+    const handleToggleCompetitionLock = async (e, comp) => {
         e.stopPropagation();
-        const msg = year.locked
-            ? `${year.name} 데이터 전체를 잠금 해제 하시겠습니까?`
-            : `${year.name} 데이터 전체를 잠금 하시겠습니까?`;
+        const msg = comp.locked
+            ? `${comp.name} 데이터 전체를 잠금 해제 하시겠습니까?`
+            : `${comp.name} 데이터 전체를 잠금 하시겠습니까?`;
 
         if (window.confirm(msg)) {
-            await toggleYearLock(year.id, !year.locked);
+            await toggleCompetitionLock(comp.id, !comp.locked);
         }
     };
 
-    const handleToggleCategoryLock = async (e, yearId, cat) => {
+    const handleToggleCategoryLock = async (e, compId, cat) => {
         e.stopPropagation();
-        const year = allYears.find(y => y.id === yearId);
+        const comp = allCompetitions.find(y => y.id === compId);
         const msg = cat.locked
-            ? `${year?.name || '해당 연도'} [${cat.name}] 데이터를 잠금 해제 하시겠습니까?`
-            : `${year?.name || '해당 연도'} [${cat.name}] 데이터를 잠금 하시겠습니까?`;
+            ? `${comp?.name || '해당 대회'} [${cat.name}] 데이터를 잠금 해제 하시겠습니까?`
+            : `${comp?.name || '해당 대회'} [${cat.name}] 데이터를 잠금 하시겠습니까?`;
 
         if (window.confirm(msg)) {
-            await toggleCategoryLock(yearId, cat.id, !cat.locked);
+            await toggleCategoryLock(compId, cat.id, !cat.locked);
         }
     };
 
@@ -140,26 +152,35 @@ const Sidebar = ({ width, isOpen, onClose, onRequestLogout }) => {
         setTempCatName(cat.name);
     };
 
-    const handleUpdateCategory = (yearId, catId) => {
+    const handleUpdateCategory = (compId, catId) => {
         if (tempCatName.trim()) {
-            updateCategory(yearId, catId, tempCatName.trim());
+            updateCategory(compId, catId, tempCatName.trim());
             setEditingCatId(null);
         }
     };
 
-    const handleDeleteCategory = (yearId, catId, name) => {
+    const handleDeleteCategory = async (compId, catId, name) => {
+        if (isDeletingRef.current) return;
+
         // Check for scores in this category
         const catScores = scores[catId];
         const hasScores = catScores && Object.keys(catScores).length > 0;
 
-        if (hasScores) {
-            if (window.confirm(`경고: '${name}' 종목에 점수 데이터가 존재합니다.\n삭제 시 모든 참가자와 점수가 삭제됩니다.\n\n정말 삭제하시겠습니까? (관리자 최종 선택)`)) {
-                deleteCategory(yearId, catId);
+        isDeletingRef.current = true;
+        try {
+            if (hasScores) {
+                if (window.confirm(`경고: '${name}' 종목에 점수 데이터가 존재합니다.\n삭제 시 모든 참가자와 점수가 삭제됩니다.\n\n정말 삭제하시겠습니까? (관리자 최종 선택)`)) {
+                    await deleteCategory(compId, catId);
+                }
+            } else {
+                if (window.confirm(`'${name}' 종목을 삭제하시겠습니까?`)) {
+                    await deleteCategory(compId, catId);
+                }
             }
-        } else {
-            if (window.confirm(`'${name}' 종목을 삭제하시겠습니까?`)) {
-                deleteCategory(yearId, catId);
-            }
+        } catch (err) {
+            console.error('Error deleting category:', err);
+        } finally {
+            isDeletingRef.current = false;
         }
     };
 
@@ -168,120 +189,38 @@ const Sidebar = ({ width, isOpen, onClose, onRequestLogout }) => {
         onClose?.();
     };
 
-    const CategoryItem = ({ cat, yearId }) => {
-        const dragControls = useDragControls();
-        const isActive = selectedCategoryId === cat.id;
-        const userRole = currentUser?.role || 'USER'; // Define userRole here for CategoryItem
-
-        return (
-            <Reorder.Item
-                value={cat}
-                dragListener={false}
-                dragControls={dragControls}
-                className="group/cat relative flex items-center"
-            >
-                {editingCatId === cat.id ? (
-                    <div className="flex-1 flex items-center gap-1 mx-6 my-1">
-                        <input
-                            autoFocus
-                            className="bg-white/10 border border-white/20 rounded px-2 py-0.5 text-[10px] w-full outline-none text-white"
-                            value={tempCatName}
-                            onChange={(e) => setTempCatName(e.target.value)}
-                            onKeyDown={(e) => e.key === 'Enter' && handleUpdateCategory(yearId, cat.id)}
-                        />
-                        <button onClick={() => handleUpdateCategory(yearId, cat.id)} className="text-emerald-400 p-1"><Check size={12} /></button>
-                        <button onClick={() => setEditingCatId(null)} className="text-slate-400 p-1">×</button>
-                    </div>
-                ) : (
-                    <div
-                        onClick={() => {
-                            setSelectedCategoryId(cat.id);
-                            if (['ADMIN', 'ROOT_ADMIN', 'JUDGE', 'SPECTATOR'].includes(userRole)) {
-                                setActiveView('scorer');
-                            }
-                            handleNavClick();
-                        }}
-                        className={cn(
-                            "sidebar-item w-full flex items-center gap-2 pl-3 relative cursor-pointer",
-                            isActive && activeView !== 'admin' ? "active text-white" : "text-slate-500"
-                        )}
-                        role="button"
-                        tabIndex={0}
-                        onKeyDown={(e) => {
-                            if (e.key === 'Enter' || e.key === ' ') {
-                                setSelectedCategoryId(cat.id);
-                                if (['ADMIN', 'ROOT_ADMIN', 'JUDGE', 'SPECTATOR'].includes(userRole)) {
-                                    setActiveView('scorer');
-                                }
-                                handleNavClick();
-                            }
-                        }}
-                    >
-                        {(userRole === 'ADMIN' || userRole === 'ROOT_ADMIN') && (
-                            <div
-                                className="cursor-grab active:cursor-grabbing p-1 -ml-1 text-slate-700 hover:text-slate-400 transition-colors"
-                                onPointerDown={(e) => dragControls.start(e)}
-                            >
-                                <GripVertical size={12} />
-                            </div>
-                        )}
-                        {isActive && (
-                            <div className="absolute left-0 w-1 h-4 bg-indigo-500 rounded-full" />
-                        )}
-                        <Layers size={12} className={cn("shrink-0", isActive ? "text-indigo-400" : "text-slate-700")} />
-                        <span className="flex-1 whitespace-normal break-words leading-tight py-1">{cat.name}</span>
-                        {(userRole === 'ADMIN' || userRole === 'ROOT_ADMIN') && (
-                            <div className="flex items-center gap-1 opacity-0 group-hover/cat:opacity-100 transition-opacity">
-                                <button
-                                    onClick={(e) => handleToggleCategoryLock(e, yearId, cat)}
-                                    className={cn("p-1 hover:bg-white/10 rounded", cat.locked ? "text-rose-400 opacity-100" : "text-emerald-400")}
-                                    title={cat.locked ? "잠금 해제" : "잠금"}
-                                >
-                                    {cat.locked ? <Lock size={12} /> : <Unlock size={12} />}
-                                </button>
-                                <button
-                                    onClick={(e) => handleEditCategory(e, cat)}
-                                    className="p-1 text-slate-400 hover:text-white hover:bg-white/10 rounded"
-                                >
-                                    <Edit2 size={12} />
-                                </button>
-                                <button
-                                    onClick={(e) => {
-                                        e.stopPropagation();
-                                        handleDeleteCategory(yearId, cat.id, cat.name);
-                                    }}
-                                    className="p-1 text-slate-500 hover:text-rose-400 hover:bg-white/10 rounded transition-colors"
-                                    title="삭제"
-                                >
-                                    <Trash2 size={12} />
-                                </button>
-                            </div>
-                        )}
-                        {cat.locked && (userRole !== 'ADMIN' && userRole !== 'ROOT_ADMIN') && <Lock size={12} className="text-rose-400 mr-2" />}
-                    </div>
-                )}
-            </Reorder.Item>
-        );
-    };
-
-
-
-    // Filter years for Judges
     const userRole = currentUser?.role || 'USER';
 
-    const visibleYears = React.useMemo(() => {
+    const visibleCompetitions = React.useMemo(() => {
         if (!currentUser) return [];
-        // ROOT_ADMIN, ADMIN, SPECTATOR -> See all
         if (['ROOT_ADMIN', 'ADMIN', 'SPECTATOR'].includes(userRole)) {
-            return allYears;
+            return allCompetitions;
         }
-        // JUDGE -> See only assigned years
         if (userRole === 'JUDGE') {
-            const assigned = currentUser.assignedYears || [];
-            return allYears.filter(y => assigned.includes(y.id));
+            const assigned = currentUser.assignedCompetitions || [];
+            return allCompetitions.filter(c => assigned.includes(c.id));
         }
         return [];
-    }, [allYears, currentUser, userRole]);
+    }, [allCompetitions, currentUser, userRole]);
+
+    const categoryItemProps = {
+        selectedCategoryId,
+        activeView,
+        editingCatId,
+        tempCatName,
+        currentUser,
+        userRole,
+        setSelectedCategoryId,
+        setActiveView,
+        handleNavClick,
+        setTempCatName,
+        handleUpdateCategory,
+        setEditingCatId,
+        handleToggleCategoryLock,
+        handleEditCategory,
+        handleDeleteCategory,
+        updateCategoriesOrder
+    };
 
     return (
         <aside
@@ -370,92 +309,108 @@ const Sidebar = ({ width, isOpen, onClose, onRequestLogout }) => {
                     <h2 className="text-[12px] font-black text-slate-400 uppercase tracking-widest">Competition Hierarchy</h2>
                     {(userRole === 'ADMIN' || userRole === 'ROOT_ADMIN') && (
                         <button
-                            onClick={() => setIsAddingYear(!isAddingYear)}
+                            onClick={() => setIsAddingCompetition(!isAddingCompetition)}
                             className={cn(
                                 "p-1 rounded-md transition-colors",
-                                isAddingYear ? "bg-rose-500/20 text-rose-400" : "hover:bg-white/10 text-slate-500 hover:text-indigo-400"
+                                isAddingCompetition ? "bg-rose-500/20 text-rose-400" : "hover:bg-white/10 text-slate-500 hover:text-indigo-400"
                             )}
                         >
-                            {isAddingYear ? <Plus size={14} className="rotate-45" /> : <Plus size={14} />}
+                            {isAddingCompetition ? <Plus size={14} className="rotate-45" /> : <Plus size={14} />}
                         </button>
                     )}
                 </div>
 
-                {isAddingYear && (
+                {isAddingCompetition && (
                     <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} className="px-2 mb-4">
                         <input
                             autoFocus
-                            placeholder="New Year (e.g. 2026)"
+                            placeholder="New Competition (e.g. 2026)"
                             className="w-full bg-indigo-500/10 border border-indigo-500/30 rounded-lg px-3 py-2 text-xs text-white focus:outline-none"
-                            value={newYearName}
-                            onChange={(e) => setNewYearName(e.target.value)}
-                            onKeyDown={handleAddYear}
+                            value={newCompetitionName}
+                            onChange={(e) => setNewCompetitionName(e.target.value)}
+                            onKeyDown={handleAddCompetition}
                         />
                     </motion.div>
                 )}
 
-                {visibleYears.map((year) => (
-                    <div key={year.id} className="space-y-1">
+                {visibleCompetitions.map((comp) => (
+                    <div key={comp.id} className="space-y-1">
                         <div className="group flex items-center">
-                            {editingYearId === year.id ? (
+                            {editingCompId === comp.id ? (
                                 <div className="flex-1 flex items-center gap-1 mx-2">
                                     <input
                                         autoFocus
                                         className="bg-white/10 border border-white/20 rounded px-2 py-1 text-xs w-full outline-none"
-                                        value={tempYearName}
-                                        onChange={(e) => setTempYearName(e.target.value)}
-                                        onKeyDown={(e) => e.key === 'Enter' && handleSaveYearName(year.id)}
+                                        value={tempCompIdName}
+                                        onChange={(e) => setTempCompIdName(e.target.value)}
+                                        onKeyDown={(e) => e.key === 'Enter' && handleSaveCompIdName(comp.id)}
                                     />
-                                    <button onClick={() => handleSaveYearName(year.id)} className="text-emerald-400 p-1"><Check size={14} /></button>
+                                    <button onClick={() => handleSaveCompIdName(comp.id)} className="text-emerald-400 p-1"><Check size={14} /></button>
                                 </div>
                             ) : (
                                 <div
-                                    onClick={() => toggleYear(year.id)}
-                                    className="sidebar-item flex-1 flex items-center group/btn cursor-pointer"
+                                    onClick={() => toggleCompetition(comp.id)}
+                                    className="sidebar-item flex-1 min-w-0 flex items-center group/btn cursor-pointer !transform-none"
                                     role="button"
                                     tabIndex={0}
-                                    onKeyDown={(e) => (e.key === 'Enter' || e.key === ' ') && toggleYear(year.id)}
+                                    onKeyDown={(e) => (e.key === 'Enter' || e.key === ' ') && toggleCompetition(comp.id)}
                                 >
-                                    {expandedYears[year.id] ? <ChevronDown size={14} className="mr-2 text-indigo-400" /> : <ChevronRight size={14} className="mr-2 text-slate-600" />}
-                                    <Calendar size={14} className={cn("mr-3 transition-colors", expandedYears[year.id] ? "text-indigo-400" : "text-slate-600")} />
-                                    <span className={cn("flex-1 text-left font-bold transition-colors text-sm", expandedYears[year.id] ? "text-white" : "text-slate-400")}>{year.name}</span>
-
+                                    {expandedCompetitions[comp.id] ? <ChevronDown size={14} className="mr-2 text-indigo-400 shrink-0" /> : <ChevronRight size={14} className="mr-2 text-slate-600 shrink-0" />}
+                                    <Calendar size={14} className={cn("mr-3 transition-colors shrink-0", expandedCompetitions[comp.id] ? "text-indigo-400" : "text-slate-600")} />
+                                    <span className={cn("flex-1 min-w-0 text-left font-bold transition-colors text-sm whitespace-normal break-words leading-tight py-1", expandedCompetitions[comp.id] ? "text-white" : "text-slate-400")}>{comp.name}</span>
                                     {(userRole === 'ADMIN' || userRole === 'ROOT_ADMIN') && (
-                                        <div className="flex items-center gap-1 opacity-0 group-hover/btn:opacity-100 transition-opacity mr-2">
+                                        <div
+                                            className="flex items-center gap-0.5 opacity-0 group-hover/btn:opacity-100 transition-opacity mr-2 shrink-0"
+                                            onClick={(e) => e.stopPropagation()}
+                                            onMouseDown={(e) => e.stopPropagation()}
+                                            onPointerDown={(e) => e.stopPropagation()}
+                                        >
                                             <button
-                                                onClick={(e) => handleToggleYearLock(e, year)}
-                                                className={cn("p-1.5 rounded-lg transition-colors", year.locked ? "text-rose-400 bg-rose-500/10" : "text-emerald-400 hover:bg-emerald-500/10")}
-                                                title={year.locked ? "연도 잠금 해제" : "연도 잠금"}
+                                                onClick={(e) => {
+                                                    e.preventDefault();
+                                                    e.stopPropagation();
+                                                    handleToggleCompetitionLock(e, comp);
+                                                }}
+                                                onMouseDown={(e) => e.stopPropagation()}
+                                                className={cn("p-1.5 rounded-lg transition-colors", comp.locked ? "text-rose-400 bg-rose-500/10" : "text-emerald-400 hover:bg-emerald-500/10")}
+                                                title={comp.locked ? "대회 잠금 해제" : "대회 잠금"}
                                             >
-                                                {year.locked ? <Lock size={14} /> : <Unlock size={14} />}
+                                                {comp.locked ? <Lock size={14} /> : <Unlock size={14} />}
                                             </button>
                                             <button
                                                 onClick={(e) => {
+                                                    e.preventDefault();
                                                     e.stopPropagation();
-                                                    setEditingYearId(year.id);
-                                                    setTempYearName(year.name);
+                                                    setEditingCompId(comp.id);
+                                                    setTempCompIdName(comp.name);
                                                 }}
+                                                onMouseDown={(e) => e.stopPropagation()}
                                                 className="p-1 text-slate-500 hover:text-indigo-400 rounded hover:bg-white/10"
                                                 title="수정"
                                             >
                                                 <Edit2 size={12} />
                                             </button>
                                             <button
-                                                onClick={(e) => handleDeleteYear(e, year.id)}
+                                                onClick={(e) => {
+                                                    e.preventDefault();
+                                                    e.stopPropagation();
+                                                    handleDeleteCompetition(e, comp.id);
+                                                }}
+                                                onMouseDown={(e) => e.stopPropagation()}
                                                 className="p-1.5 text-slate-500 hover:text-rose-400 hover:bg-rose-500/10 rounded-lg transition-colors"
-                                                title="연도 삭제"
+                                                title="대회 삭제"
                                             >
                                                 <Trash2 size={14} />
                                             </button>
                                         </div>
                                     )}
-                                    {year.locked && (userRole !== 'ADMIN' && userRole !== 'ROOT_ADMIN') && <Lock size={12} className="text-rose-400 mr-2" />}
+                                    {comp.locked && (userRole !== 'ADMIN' && userRole !== 'ROOT_ADMIN') && <Lock size={12} className="text-rose-400 mr-2" />}
                                 </div>
                             )}
                         </div>
 
                         <AnimatePresence initial={false}>
-                            {expandedYears[year.id] && (
+                            {expandedCompetitions[comp.id] && (
                                 <motion.div
                                     initial={{ height: 0, opacity: 0 }}
                                     animate={{ height: 'auto', opacity: 1 }}
@@ -464,16 +419,21 @@ const Sidebar = ({ width, isOpen, onClose, onRequestLogout }) => {
                                 >
                                     <Reorder.Group
                                         axis="y"
-                                        values={[...(year.categories || [])].sort((a, b) => (a.order || 0) - (b.order || 0))}
-                                        onReorder={(newOrder) => updateCategoriesOrder(year.id, newOrder)}
+                                        values={[...(comp.categories || [])].sort((a, b) => (a.order || 0) - (b.order || 0))}
+                                        onReorder={(newOrder) => updateCategoriesOrder(comp.id, newOrder)}
                                         className="space-y-1"
                                     >
-                                        {[...(year.categories || [])].sort((a, b) => (a.order || 0) - (b.order || 0)).map((cat) => (
-                                            <CategoryItem key={cat.id} cat={cat} yearId={year.id} />
+                                        {[...(comp.categories || [])].sort((a, b) => (a.order || 0) - (b.order || 0)).map((cat) => (
+                                            <CategoryItem
+                                                key={cat.id}
+                                                cat={cat}
+                                                compId={comp.id}
+                                                {...categoryItemProps}
+                                            />
                                         ))}
                                     </Reorder.Group>
 
-                                    {addingCatFor === year.id ? (
+                                    {addingCatFor === comp.id ? (
                                         <div className="px-6 py-1">
                                             <input
                                                 autoFocus
@@ -481,14 +441,14 @@ const Sidebar = ({ width, isOpen, onClose, onRequestLogout }) => {
                                                 className="w-full bg-white/5 border border-white/10 rounded-md px-2 py-1 text-[10px] text-white outline-none focus:border-indigo-500/50"
                                                 value={newCatName}
                                                 onChange={(e) => setNewCatName(e.target.value)}
-                                                onKeyDown={(e) => e.key === 'Enter' && handleAddCategory(year.id)}
+                                                onKeyDown={(e) => e.key === 'Enter' && handleAddCategory(comp.id)}
                                                 onBlur={() => !newCatName && setAddingCatFor(null)}
                                             />
                                         </div>
                                     ) : (
                                         (userRole === 'ADMIN' || userRole === 'ROOT_ADMIN') && (
                                             <button
-                                                onClick={() => setAddingCatFor(year.id)}
+                                                onClick={() => setAddingCatFor(comp.id)}
                                                 className="sidebar-item w-full flex items-center gap-2 text-slate-600 hover:text-indigo-400 pl-6 py-2 group/add"
                                             >
                                                 <Plus size={10} className="group-hover/add:rotate-90 transition-transform" />
@@ -529,5 +489,156 @@ const Sidebar = ({ width, isOpen, onClose, onRequestLogout }) => {
         </aside>
     );
 };
+
+// --- STABILIZED CATEGORY ITEM ---
+const CategoryItem = React.memo(({
+    cat,
+    compId,
+    selectedCategoryId,
+    activeView,
+    editingCatId,
+    tempCatName,
+    currentUser,
+    userRole,
+    setSelectedCategoryId,
+    setActiveView,
+    handleNavClick,
+    setTempCatName,
+    handleUpdateCategory,
+    setEditingCatId,
+    handleToggleCategoryLock,
+    handleEditCategory,
+    handleDeleteCategory,
+    updateCategoriesOrder
+}) => {
+    const dragControls = useDragControls();
+    const isActive = selectedCategoryId === cat.id;
+
+    const stopEvents = (e) => {
+        e.stopPropagation();
+    };
+
+    return (
+        <Reorder.Item
+            value={cat}
+            dragListener={false}
+            dragControls={dragControls}
+            className="group/cat relative flex items-center"
+        >
+            {editingCatId === cat.id ? (
+                <div className="flex-1 flex items-center gap-1 mx-6 my-1">
+                    <input
+                        autoFocus
+                        className="bg-white/10 border border-white/20 rounded px-2 py-0.5 text-[10px] w-full outline-none text-white"
+                        value={tempCatName}
+                        onChange={(e) => setTempCatName(e.target.value)}
+                        onKeyDown={(e) => e.key === 'Enter' && handleUpdateCategory(compId, cat.id)}
+                    />
+                    <button onClick={() => handleUpdateCategory(compId, cat.id)} className="text-emerald-400 p-1"><Check size={12} /></button>
+                    <button onClick={() => setEditingCatId(null)} className="text-slate-400 p-1">×</button>
+                </div>
+            ) : (
+                <div
+                    onClick={(e) => {
+                        if (e.defaultPrevented) return;
+                        setSelectedCategoryId(cat.id);
+                        if (['ADMIN', 'ROOT_ADMIN', 'JUDGE', 'SPECTATOR'].includes(userRole)) {
+                            setActiveView('scorer');
+                        }
+                        handleNavClick();
+                    }}
+                    className={cn(
+                        "sidebar-item w-full flex items-start gap-2 pl-3 pr-2 py-1.5 relative cursor-pointer !transform-none group/item",
+                        isActive && activeView !== 'admin' ? "active text-white" : "text-slate-500"
+                    )}
+                    role="button"
+                    tabIndex={0}
+                    onKeyDown={(e) => {
+                        if (e.key === 'Enter' || e.key === ' ') {
+                            setSelectedCategoryId(cat.id);
+                            if (['ADMIN', 'ROOT_ADMIN', 'JUDGE', 'SPECTATOR'].includes(userRole)) {
+                                setActiveView('scorer');
+                            }
+                            handleNavClick();
+                        }
+                    }}
+                >
+                    {(userRole === 'ADMIN' || userRole === 'ROOT_ADMIN') && (
+                        <div
+                            className="cursor-grab active:cursor-grabbing p-1 -ml-1 text-slate-700 hover:text-slate-400 transition-colors shrink-0 mt-1"
+                            onPointerDown={(e) => dragControls.start(e)}
+                        >
+                            <GripVertical size={12} />
+                        </div>
+                    )}
+                    {isActive && (
+                        <div className="absolute left-0 w-1 h-4 bg-indigo-500 rounded-full shrink-0 mt-2.5" />
+                    )}
+                    <Layers size={12} className={cn("shrink-0 mt-2", isActive ? "text-indigo-400" : "text-slate-700")} />
+                    <span className="flex-1 min-w-0 whitespace-normal break-words leading-tight py-1.5 mr-2">{cat.name}</span>
+                    {(userRole === 'ADMIN' || userRole === 'ROOT_ADMIN') && (
+                        <div
+                            className="flex items-center gap-0.5 shrink-0 min-w-max opacity-0 group-hover/item:opacity-100 transition-opacity mt-1"
+                            onClick={stopEvents}
+                            onMouseDown={stopEvents}
+                            onMouseUp={stopEvents}
+                            onPointerDown={stopEvents}
+                            onPointerUp={stopEvents}
+                        >
+                            <button
+                                onClick={(e) => {
+                                    e.preventDefault();
+                                    e.stopPropagation();
+                                    handleToggleCategoryLock(e, compId, cat);
+                                }}
+                                onMouseDown={stopEvents}
+                                onMouseUp={stopEvents}
+                                onPointerDown={stopEvents}
+                                onPointerUp={stopEvents}
+                                className={cn("p-1 hover:bg-white/10 rounded shrink-0", cat.locked ? "text-rose-400 opacity-100" : "text-emerald-400")}
+                                title={cat.locked ? "잠금 해제" : "잠금"}
+                            >
+                                {cat.locked ? <Lock size={12} /> : <Unlock size={12} />}
+                            </button>
+                            <button
+                                onClick={(e) => {
+                                    e.preventDefault();
+                                    e.stopPropagation();
+                                    handleEditCategory(e, cat);
+                                }}
+                                onMouseDown={stopEvents}
+                                onMouseUp={stopEvents}
+                                onPointerDown={stopEvents}
+                                onPointerUp={stopEvents}
+                                className="p-1 text-slate-400 hover:text-white hover:bg-white/10 rounded shrink-0"
+                                title="수정"
+                            >
+                                <Edit2 size={12} />
+                            </button>
+                            <button
+                                onClick={(e) => {
+                                    e.preventDefault();
+                                    e.stopPropagation();
+                                    handleDeleteCategory(compId, cat.id, cat.name);
+                                }}
+                                onMouseDown={(e) => {
+                                    e.stopPropagation();
+                                }}
+                                onMouseUp={stopEvents}
+                                onPointerDown={stopEvents}
+                                onPointerUp={stopEvents}
+                                className="p-1 text-slate-500 hover:text-rose-400 hover:bg-white/10 rounded transition-colors shrink-0"
+                                title="삭제"
+                            >
+                                <Trash2 size={12} />
+                            </button>
+                        </div>
+                    )}
+                    {cat.locked && (userRole !== 'ADMIN' && userRole !== 'ROOT_ADMIN') && <Lock size={12} className="text-rose-400 mr-2 shrink-0 mt-2" />}
+                </div>
+            )}
+        </Reorder.Item>
+    );
+});
 
 export default Sidebar;

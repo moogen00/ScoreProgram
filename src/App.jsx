@@ -99,15 +99,14 @@ function App() {
     // Initial Role Verification
     React.useEffect(() => {
         if (currentUser) {
-            // If user has just logged in, we need to wait for role sync
-            // Logic: syncUserRole runs on snapshot. We can check if role is determined.
-            // But syncUserRole might take a moment. 
-            // Better: useStore has `isDataLoaded`? No.
-            // We can just set a small timeout or check immediately if assumes data flows quickly.
-            // Actually, if we just rely on the fact that initSync starts listeners.
+            // Only verifying if we are in a 'USER' state (waiting for sync to upgrade us)
+            // If we are already ADMIN or JUDGE, we assume we are good to go to avoid UI flicker.
+            const isUnverified = currentUser.role === 'USER';
 
-            // Let's verify after a short delay to allow snapshots to process
-            setIsVerifying(true);
+            if (isUnverified) {
+                setIsVerifying(true);
+            }
+
             const timer = setTimeout(() => {
                 const state = useStore.getState();
                 const freshUser = state.currentUser;
@@ -116,6 +115,7 @@ function App() {
                 const rootAdmins = (import.meta.env.VITE_ROOT_ADMIN_EMAILS || '').split(',').map(e => e.trim());
                 const isRoot = rootAdmins.includes(freshUser.email);
 
+                // If still USER after timeout, kick them out
                 if (freshUser && freshUser.role === 'USER' && !isRoot) {
                     alert('등록되지 않은 사용자입니다. (Unregistered User)\n\n관리자나 심사위원으로 등록된 계정만 이용할 수 있습니다.');
                     logout();

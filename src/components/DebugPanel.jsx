@@ -13,8 +13,8 @@ const DebugPanel = () => {
     if (!import.meta.env.DEV) return null;
 
     const collections = [
-        { name: 'Years', count: state.years.length },
-        { name: 'Judges', count: Object.values(state.judgesByYear).flat().length },
+        { name: 'Competitions', count: state.competitions.length },
+        { name: 'Judges', count: Object.values(state.judgesByComp || {}).flat().length },
         { name: 'Participants', count: Object.values(state.participants).flat().length },
         { name: 'Scores', count: Object.values(state.scores).flat().length },
         { name: 'Admins', count: state.admins.length },
@@ -23,7 +23,7 @@ const DebugPanel = () => {
     // Detect Ghost Categories
     const allCatIds = Object.keys(state.participants);
     const existingCatIds = new Set();
-    state.years.forEach(y => (y.categories || []).forEach(c => existingCatIds.add(c.id)));
+    state.competitions.forEach(c => (c.categories || []).forEach(cat => existingCatIds.add(cat.id)));
     const ghostCategories = allCatIds.filter(id => !existingCatIds.has(id));
 
     const handleFixGhosts = async () => {
@@ -37,7 +37,7 @@ const DebugPanel = () => {
             for (const ghostId of ghostCategories) {
                 // Assume format: YYYY-category-name-slug or custom-id
                 const parts = ghostId.split('-');
-                const yearId = parts[0]; // e.g., "2024", "2025"
+                const compId = parts[0]; // e.g., "comp-2024" or just "2024" if legacy
 
                 // Extract name from ID if possible
                 let nameSlug = parts.slice(1).join(' ');
@@ -49,9 +49,9 @@ const DebugPanel = () => {
                     .map(w => w.charAt(0).toUpperCase() + w.slice(1))
                     .join(' ');
 
-                const year = state.years.find(y => y.id === yearId);
-                if (year) {
-                    const existingCats = year.categories || [];
+                const comp = state.competitions.find(c => c.id === compId);
+                if (comp) {
+                    const existingCats = comp.categories || [];
                     if (existingCats.some(c => c.id === ghostId)) continue; // Already exists
 
                     const newCat = {
@@ -60,18 +60,18 @@ const DebugPanel = () => {
                         order: existingCats.length
                     };
                     const updatedCategories = [...existingCats, newCat];
-                    await updateDoc(doc(db, 'years', yearId), { categories: updatedCategories });
+                    await updateDoc(doc(db, 'competitions', compId), { categories: updatedCategories });
                     restoredCount++;
-                    console.log(`[Fix] Restored category: ${displayName} (${ghostId}) to Year ${yearId}`);
+                    console.log(`[Fix] Restored category: ${displayName} (${ghostId}) to Competition ${compId}`);
                 } else {
-                    console.warn(`[Fix] Could not find year ${yearId} for ghost category ${ghostId}`);
-                    // Option: Create year? Better to let admin handle it or fix ID.
+                    console.warn(`[Fix] Could not find competition ${compId} for ghost category ${ghostId}`);
+                    // Option: Create comp? Better to let admin handle it or fix ID.
                 }
             }
             if (restoredCount > 0) {
                 alert(`${restoredCount}개의 끊어진 종목이 복구되었습니다!`);
             } else {
-                alert("복구할 수 있는 종목이 없습니다. 연도 ID가 일치하는지 확인해 주세요.");
+                alert("복구할 수 있는 종목이 없습니다. 대회 ID가 일치하는지 확인해 주세요.");
             }
         } catch (error) {
             console.error("Error fixing ghost categories:", error);
@@ -177,9 +177,9 @@ const DebugPanel = () => {
 
                                 <div className="grid grid-cols-2 gap-2">
                                     <div className="bg-black/20 p-1.5 rounded">
-                                        <p className="text-slate-500 uppercase text-[8px]">In "Years"</p>
-                                        <p className={state.years.some(y => y.categories?.some(c => c.id === state.selectedCategoryId)) ? "text-emerald-400 font-bold" : "text-rose-400 font-bold"}>
-                                            {state.years.some(y => y.categories?.some(c => c.id === state.selectedCategoryId)) ? "YES" : "NO"}
+                                        <p className="text-slate-500 uppercase text-[8px]">In "Competitions"</p>
+                                        <p className={state.competitions.some(c => c.categories?.some(cat => cat.id === state.selectedCategoryId)) ? "text-emerald-400 font-bold" : "text-rose-400 font-bold"}>
+                                            {state.competitions.some(c => c.categories?.some(cat => cat.id === state.selectedCategoryId)) ? "YES" : "NO"}
                                         </p>
                                     </div>
                                     <div className="bg-black/20 p-1.5 rounded">
@@ -194,28 +194,28 @@ const DebugPanel = () => {
                                     <p className="text-slate-500 uppercase text-[8px]">Judge Permission</p>
                                     <div className="flex items-center gap-2 mt-1">
                                         <p className={
-                                            (state.judgesByYear[state.selectedCategoryId?.split('-')[0]]?.some(j => j.email === state.currentUser?.email))
+                                            (state.judgesByComp?.[state.selectedCategoryId?.split('-')[0]]?.some(j => j.email === state.currentUser?.email))
                                                 ? "text-emerald-400 font-bold text-[10px]"
                                                 : "text-amber-400 font-bold text-[10px]"
                                         }>
-                                            {state.judgesByYear[state.selectedCategoryId?.split('-')[0]]?.some(j => j.email === state.currentUser?.email)
+                                            {state.judgesByComp?.[state.selectedCategoryId?.split('-')[0]]?.some(j => j.email === state.currentUser?.email)
                                                 ? "ASSIGNED"
                                                 : "NOT ASSIGNED (Role: " + (state.currentUser?.role || 'None') + ")"}
                                         </p>
-                                        {state.selectedCategoryId && !state.judgesByYear[state.selectedCategoryId.split('-')[0]]?.some(j => j.email === state.currentUser?.email) && (
+                                        {state.selectedCategoryId && !state.judgesByComp?.[state.selectedCategoryId.split('-')[0]]?.some(j => j.email === state.currentUser?.email) && (
                                             <button
                                                 onClick={async () => {
-                                                    const yearId = state.selectedCategoryId.split('-')[0];
+                                                    const compId = state.selectedCategoryId.split('-')[0];
                                                     const email = state.currentUser?.email;
                                                     const name = state.currentUser?.name || 'Judge';
-                                                    if (!yearId || !email) return;
+                                                    if (!compId || !email) return;
 
                                                     try {
-                                                        const docRef = doc(db, 'judges', `${yearId}_${email}`);
-                                                        await setDoc(docRef, { yearId, email, name });
+                                                        const docRef = doc(db, 'judges', `${compId}_${email}`);
+                                                        await setDoc(docRef, { compId, email, name });
                                                         // Force a quick reload of role sync via store if needed, mostly auto-syncs
                                                         state.syncUserRole();
-                                                        alert(`Assigned ${email} to Year ${yearId}`);
+                                                        alert(`Assigned ${email} to Competition ${compId}`);
                                                     } catch (e) {
                                                         console.error(e);
                                                         alert('Error assigning judge');
@@ -233,11 +233,11 @@ const DebugPanel = () => {
                                     <p className="text-slate-500 uppercase text-[8px] mb-1">Lock Diagnostics</p>
                                     <div className="grid grid-cols-3 gap-2 text-[9px] text-center">
                                         <div className="bg-white/5 p-1 rounded">
-                                            <span className="text-slate-500 block">Year Locked</span>
+                                            <span className="text-slate-500 block">Competition Locked</span>
                                             {(() => {
-                                                const yId = state.selectedCategoryId?.split('-')[0];
-                                                const year = state.years.find(y => y.id === yId);
-                                                return <span className={year?.locked ? "text-rose-400 font-bold" : "text-emerald-400"}>{year?.locked ? "YES" : "NO"}</span>
+                                                const compId = state.selectedCategoryId?.split('-')[0];
+                                                const comp = state.competitions.find(c => c.id === compId);
+                                                return <span className={comp?.locked ? "text-rose-400 font-bold" : "text-emerald-400"}>{comp?.locked ? "YES" : "NO"}</span>
                                             })()}
                                         </div>
                                         <div className="bg-white/5 p-1 rounded">
@@ -250,11 +250,11 @@ const DebugPanel = () => {
                                         <div className="bg-white/5 p-1 rounded">
                                             <span className="text-slate-500 block">Scorer Locked</span>
                                             {(() => {
-                                                const yId = state.selectedCategoryId?.split('-')[0];
-                                                const year = state.years.find(y => y.id === yId);
+                                                const compId = state.selectedCategoryId?.split('-')[0];
+                                                const comp = state.competitions.find(c => c.id === compId);
                                                 const isAdmin = state.currentUser?.role.includes('ADMIN');
                                                 const canEdit = (isAdmin || state.currentUser?.role === 'JUDGE');
-                                                const isLocked = (year?.locked && !isAdmin) || !canEdit;
+                                                const isLocked = (comp?.locked && !isAdmin) || !canEdit;
                                                 return <span className={isLocked ? "text-rose-400 font-bold" : "text-emerald-400 font-bold"}>{isLocked ? "LOCKED" : "OPEN"}</span>
                                             })()}
                                         </div>

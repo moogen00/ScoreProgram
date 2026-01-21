@@ -8,19 +8,19 @@ function cn(...inputs) {
 }
 
 const Header = ({ onMenuClick, onRequestLogout }) => {
-    const { currentUser, selectedCategoryId, years } = useStore();
+    const { currentUser, selectedCategoryId, competitions } = useStore();
 
-    // Find current year and category names for breadcrumbs
+    // Find current competition and category names for breadcrumbs
     const findInfo = () => {
-        if (!selectedCategoryId) return { yearName: 'HOME', catName: 'Dashboard' };
-        for (const year of years) {
-            const cat = year?.categories?.find(c => c.id === selectedCategoryId);
-            if (cat) return { yearName: year.name || '대회 연도 미정', catName: cat.name || '종목 미지정' };
+        if (!selectedCategoryId) return { compName: 'HOME', catName: 'Dashboard' };
+        for (const comp of competitions) {
+            const cat = comp?.categories?.find(c => c.id === selectedCategoryId);
+            if (cat) return { compName: comp.name || '대회 미정', catName: cat.name || '종목 미지정' };
         }
-        return { yearName: 'HOME', catName: 'Dashboard' };
+        return { compName: 'HOME', catName: 'Dashboard' };
     };
 
-    const { yearName, catName } = findInfo();
+    const { compName, catName } = findInfo();
 
     const getRoleConfig = (role) => {
         switch (role) {
@@ -45,7 +45,7 @@ const Header = ({ onMenuClick, onRequestLogout }) => {
                         <Menu size={18} />
                     </button>
                     <Calendar size={10} className="text-indigo-400/50" />
-                    <span>{yearName}</span>
+                    <span>{compName}</span>
                     <ChevronRight size={10} className="opacity-30" />
                     <Layers size={10} className="text-indigo-400 shrink-0" />
                     <span className="text-indigo-400 break-words">{catName}</span>

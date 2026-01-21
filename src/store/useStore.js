@@ -29,11 +29,11 @@ const useStore = create((set, get) => ({
 
     // Hierarchy & Settings
     competitionName: '...', // Loaded from DB
-    years: [], // [ { id, name, locked, categories: [ { id, name, order } ] } ]
+    competitions: [], // [ { id, name, locked, createdAt, categories: [ { id, name, order } ] } ]
     selectedCategoryId: '',
     activeView: null, // 'admin', 'leaderboard', 'scorer', null
     scoringItems: [],
-    judgesByYear: {}, // { [yearId]: [ { email, name } ] }
+    judgesByComp: {}, // { [compId]: [ { email, name } ] }
     participants: {}, // { [categoryId]: [ { id, number, name } ] }
     scores: {}, // { [categoryId]: { [participantId]: { [judgeEmail]: { [scoringItemId]: score } } } }
 
@@ -67,7 +67,7 @@ const useStore = create((set, get) => ({
     },
 
     syncUserRole: () => {
-        const { currentUser, judgesByYear, admins } = get();
+        const { currentUser, judgesByComp, admins } = get();
         if (!currentUser) return;
 
         // If explicitly Spectator
@@ -85,30 +85,46 @@ const useStore = create((set, get) => ({
         const rootAdmins = (import.meta.env.VITE_ROOT_ADMIN_EMAILS || '').split(',').map(e => e.trim());
         if (rootAdmins.includes(currentUser.email)) {
             role = 'ROOT_ADMIN';
-            // Optional: Root Admin doesn't have a fixed name in DB usually, but we could enforce "Root Admin" if desired.
-            // keeping existing name for now or could defaulting if missing.
         }
 
         // 2. Admin Check
-        // admins is [ { email, name } ]
+        // admins is [ { email, name, lastLoginAt } ]
         const adminEntry = admins.find(a => a.email === currentUser.email);
         if (adminEntry) {
             if (!role) role = 'ADMIN';
             registeredName = adminEntry.name;
+
+            // Track Admin Login (Throttle: only update if > 1 hour)
+            const lastLogin = adminEntry.lastLoginAt ? new Date(adminEntry.lastLoginAt).getTime() : 0;
+            if (Date.now() - lastLogin > 3600000) {
+                setDoc(doc(db, 'admins', currentUser.email), {
+                    lastLoginAt: new Date().toISOString()
+                }, { merge: true });
+            }
         }
 
-        // 3. Judge Check & Assigned Years Calculation
-        const assignedYears = [];
+        // 3. Judge Check & Assigned Competitions Calculation
+        const assignedCompetitions = [];
         let judgeEntry = null;
 
-        Object.entries(judgesByYear).forEach(([yId, list]) => {
+        Object.entries(judgesByComp).forEach(([yId, list]) => {
             const found = list.find(j => j.email === currentUser.email);
             if (found) {
                 if (!role) role = 'JUDGE';
-                assignedYears.push(yId);
+                assignedCompetitions.push(yId);
                 // We pick the name from the first matched year entry as the canonical name
                 if (!registeredName && !judgeEntry) {
                     judgeEntry = found;
+                }
+
+                // Track Judge Login (Update for this year)
+                // Note: We use the lastLoginAt from the found judge record to check if we need to update
+                // This prevents infinite loops of sync -> update -> sync -> update
+                const lastLogin = found.lastLoginAt ? new Date(found.lastLoginAt).getTime() : 0;
+                if (Date.now() - lastLogin > 3600000) { // 3600000 ms = 1 hour
+                    setDoc(doc(db, 'judges', `${yId}_${currentUser.email}`), {
+                        lastLoginAt: new Date().toISOString()
+                    }, { merge: true });
                 }
             }
         });
@@ -120,15 +136,15 @@ const useStore = create((set, get) => ({
         // 4. Default to USER if nothing found
         if (!role) role = 'USER';
 
-        // Update if changed (role, assignedYears, or name)
-        const currentAssigned = currentUser.assignedYears ? currentUser.assignedYears.join(',') : '';
-        const newAssigned = assignedYears.join(',');
+        // Update if changed (role, assignedCompetitions, or name)
+        const currentAssigned = currentUser.assignedCompetitions ? currentUser.assignedCompetitions.join(',') : '';
+        const newAssigned = assignedCompetitions.join(',');
 
         // Determine final name: Registered Name > Current Name > Email Prefix
         const finalName = registeredName || currentUser.name || currentUser.email.split('@')[0];
 
         if (currentUser.role !== role || currentAssigned !== newAssigned || currentUser.name !== finalName) {
-            const updatedUser = { ...currentUser, role, assignedYears, name: finalName };
+            const updatedUser = { ...currentUser, role, assignedCompetitions: assignedCompetitions, name: finalName };
             set({ currentUser: updatedUser });
             // Also update localStorage so it persists on refresh
             localStorage.setItem('score_program_user', JSON.stringify({ ...updatedUser, lastLoginAt: Date.now() }));
@@ -176,21 +192,21 @@ const useStore = create((set, get) => ({
     // Scorer Actions
     updateScore: async (categoryId, participantId, itemId, score) => {
         // ... (kept for backward compatibility or single updates if needed)
-        const { currentUser, years } = get();
+        const { currentUser, competitions } = get();
         // Permission check: Only JUDGE or ADMIN/ROOT_ADMIN can edit
         const isAdmin = currentUser?.role === 'ADMIN' || currentUser?.role === 'ROOT_ADMIN';
         const isJudge = currentUser?.role === 'JUDGE';
         if (!isAdmin && !isJudge) return;
 
-        // Derive granular info from years state
-        let yearName = '?';
+        // Derive granular info from competitions state
+        let compName = '?';
         let genre = 'General';
         let category = 'None';
 
-        for (const y of years) {
+        for (const y of competitions) {
             const cat = (y.categories || []).find(c => c.id === categoryId);
             if (cat) {
-                yearName = y.name;
+                compName = y.name;
                 genre = cat.genre || 'General';
                 category = cat.category || cat.name;
                 break;
@@ -203,7 +219,7 @@ const useStore = create((set, get) => ({
 
         const currentValues = snap.exists() ? snap.data().values : {};
         await setDoc(scoreRef, {
-            year: yearName,
+            competition: compName,
             genre: genre,
             category: category,
             categoryId,
@@ -218,28 +234,28 @@ const useStore = create((set, get) => ({
     },
 
     submitCategoryScores: async (categoryId, scoresMap) => {
-        const { currentUser, years } = get();
+        const { currentUser, competitions } = get();
         const isAdmin = currentUser?.role === 'ADMIN' || currentUser?.role === 'ROOT_ADMIN';
         const isJudge = currentUser?.role === 'JUDGE';
         if (!isAdmin && !isJudge) return;
 
         // Find context
-        let yearId = '';
-        let yearName = '?';
+        let compId = '';
+        let compName = '?';
         let genre = 'General';
         let category = 'None';
 
-        for (const y of years) {
+        for (const y of competitions) {
             const cat = (y.categories || []).find(c => c.id === categoryId);
             if (cat) {
-                yearId = y.id;
-                yearName = y.name;
+                compId = y.id;
+                compName = y.name;
                 genre = cat.genre || 'General';
                 category = cat.category || cat.name;
                 break;
             }
         }
-        if (!yearId) return;
+        if (!compId) return;
 
         const batch = writeBatch(db);
         const email = currentUser.email.toLowerCase();
@@ -254,7 +270,7 @@ const useStore = create((set, get) => ({
             // ensure we aren't overwriting other fields accidentally. 
             // We construct the full object similar to updateScore
             batch.set(scoreRef, {
-                year: yearName,
+                competition: compName,
                 genre: genre,
                 category: category,
                 categoryId,
@@ -266,8 +282,12 @@ const useStore = create((set, get) => ({
         }
 
         // 2. Mark as Submitted in Judge's record
-        // ID: yearId_email
-        const judgeRef = doc(db, 'judges', `${yearId}_${email}`);
+        // ID: compId_email
+        const judgeRef = doc(db, 'judges', `${compId}_${email}`);
+
+        // Reverting to set with merge: true after verifying it merges nested maps correctly.
+        // This is safer than update() because it creates the doc/field if it doesn't exist,
+        // preventing "Processing..." stuck states on new judges.
         batch.set(judgeRef, {
             submittedCategories: {
                 [categoryId]: true
@@ -278,26 +298,34 @@ const useStore = create((set, get) => ({
     },
 
     toggleJudgeSubmission: async (categoryId, isSubmitted) => {
-        const { currentUser, years } = get();
-        // Find context for yearId
-        let yearId = '';
-        for (const y of years) {
+        const { currentUser, competitions } = get();
+        // Find context for compId
+        let compId = '';
+        for (const y of competitions) {
             const cat = (y.categories || []).find(c => c.id === categoryId);
             if (cat) {
-                yearId = y.id;
+                compId = y.id;
                 break;
             }
         }
-        if (!yearId) return;
+        if (!compId) {
+            console.error('[Store] toggleJudgeSubmission: compId not found for category', categoryId);
+            return;
+        }
 
         const email = currentUser.email.toLowerCase();
-        const judgeRef = doc(db, 'judges', `${yearId}_${email}`);
+        const judgeRef = doc(db, 'judges', `${compId}_${email}`);
 
-        await setDoc(judgeRef, {
+        // Use batch for consistency with submitCategoryScores
+        const batch = writeBatch(db);
+        batch.set(judgeRef, {
             submittedCategories: {
                 [categoryId]: isSubmitted
             }
         }, { merge: true });
+
+        await batch.commit();
+        console.log(`[Store] Judge submission toggled: ${categoryId} -> ${isSubmitted}`);
     },
 
     // Management Actions
@@ -320,55 +348,60 @@ const useStore = create((set, get) => ({
     },
 
     // Hierarchy Actions
-    addYear: async (name) => {
+    addCompetition: async (name) => {
         const id = Math.random().toString(36).substr(2, 9);
-        const year = { id, name, categories: [] };
-        await setDoc(doc(db, 'years', id), year);
+        const comp = {
+            id,
+            name,
+            createdAt: new Date().toISOString(),
+            categories: []
+        };
+        await setDoc(doc(db, 'competitions', id), comp);
     },
 
-    updateYear: async (yearId, newName) => {
+    updateCompetition: async (compId, newName) => {
         const batch = writeBatch(db);
-        const yearRef = doc(db, 'years', yearId);
-        const yearSnap = await getDoc(yearRef);
-        if (!yearSnap.exists()) return;
+        const compRef = doc(db, 'competitions', compId);
+        const compSnap = await getDoc(compRef);
+        if (!compSnap.exists()) return;
 
-        const oldName = yearSnap.data().name;
-        batch.update(yearRef, { name: newName });
+        const oldName = compSnap.data().name;
+        batch.update(compRef, { name: newName });
 
-        // Cascading update for participants in all categories of this year
-        const categories = yearSnap.data().categories || [];
+        // Cascading update for participants in all categories of this competition
+        const categories = compSnap.data().categories || [];
         for (const cat of categories) {
             const pQuery = query(collection(db, 'participants'), where('categoryId', '==', cat.id));
             const pSnap = await getDocs(pQuery);
             pSnap.docs.forEach(d => {
-                batch.update(d.ref, { year: newName });
+                batch.update(d.ref, { competition: newName });
             });
 
             const sQuery = query(collection(db, 'scores'), where('categoryId', '==', cat.id));
             const sSnap = await getDocs(sQuery);
             sSnap.docs.forEach(d => {
-                batch.update(d.ref, { year: newName });
+                batch.update(d.ref, { competition: newName });
             });
         }
 
         await batch.commit();
     },
 
-    deleteYear: async (yearId) => {
+    deleteCompetition: async (compId) => {
         try {
-            console.log(`[Store] Deleting year: ${yearId}`);
+            console.log(`[Store] Deleting competition: ${compId}`);
             const batch = writeBatch(db);
-            const yearRef = doc(db, 'years', yearId);
-            const yearSnap = await getDoc(yearRef);
-            if (!yearSnap.exists()) {
-                console.warn(`[Store] Year ${yearId} not found in DB.`);
+            const compRef = doc(db, 'competitions', compId);
+            const compSnap = await getDoc(compRef);
+            if (!compSnap.exists()) {
+                console.warn(`[Store] Competition ${compId} not found in DB.`);
                 return;
             }
 
-            const categories = yearSnap.data().categories || [];
+            const categories = compSnap.data().categories || [];
 
             // 1. Delete Judges
-            const jSnap = await getDocs(query(collection(db, 'judges'), where('yearId', '==', yearId)));
+            const jSnap = await getDocs(query(collection(db, 'judges'), where('compId', '==', compId)));
             jSnap.docs.forEach(d => batch.delete(d.ref));
 
             // 2. Delete Categories, Participants, Scores
@@ -380,25 +413,25 @@ const useStore = create((set, get) => ({
                 sSnap.docs.forEach(d => batch.delete(d.ref));
             }
 
-            // 3. Delete Year itself
-            batch.delete(yearRef);
+            // 3. Delete Competition itself
+            batch.delete(compRef);
 
             await batch.commit();
-            console.log(`[Store] Year ${yearId} and associated data deleted successfully.`);
+            console.log(`[Store] Competition ${compId} and associated data deleted successfully.`);
         } catch (error) {
-            console.error('[Store] deleteYear failed:', error);
-            alert('연도 삭제 중 오류가 발생했습니다: ' + error.message);
+            console.error('[Store] deleteCompetition failed:', error);
+            alert('대회 삭제 중 오류가 발생했습니다: ' + error.message);
         }
     },
 
-    addCategory: async (yearId, name) => {
+    addCategory: async (compId, name) => {
         const catId = Math.random().toString(36).substr(2, 9);
-        const yearRef = doc(db, 'years', yearId);
-        const yearSnap = await getDoc(yearRef);
+        const compRef = doc(db, 'competitions', compId);
+        const compSnap = await getDoc(compRef);
 
-        if (yearSnap.exists()) {
-            const data = yearSnap.data();
-            const yearVal = data.name || yearId;
+        if (compSnap.exists()) {
+            const data = compSnap.data();
+            // Removed: const yearVal = data.name || compId;
 
             const parts = name.split(' ');
             const genre = parts.length > 1 ? parts[0] : 'General';
@@ -407,80 +440,79 @@ const useStore = create((set, get) => ({
             const newCategoryObj = {
                 id: catId,
                 name,
-                year: yearVal,
+                // Removed: year: yearVal,
                 genre,
                 category,
                 order: (data.categories?.length || 0)
             };
 
             const categories = [...(data.categories || []), newCategoryObj];
-            await updateDoc(yearRef, { categories });
+            await updateDoc(compRef, { categories });
         }
     },
 
-    moveCategory: async (yearId, catId, direction) => {
-        const yearRef = doc(db, 'years', yearId);
-        const yearSnap = await getDoc(yearRef);
-        if (yearSnap.exists()) {
-            const categories = [...yearSnap.data().categories].sort((a, b) => (a.order || 0) - (b.order || 0));
+    moveCategory: async (compId, catId, direction) => {
+        const compRef = doc(db, 'competitions', compId);
+        const compSnap = await getDoc(compRef);
+        if (compSnap.exists()) {
+            const categories = [...compSnap.data().categories].sort((a, b) => (a.order || 0) - (b.order || 0));
             const index = categories.findIndex(c => c.id === catId);
             const targetIndex = index + direction;
             if (targetIndex >= 0 && targetIndex < categories.length) {
                 [categories[index], categories[targetIndex]] = [categories[targetIndex], categories[index]];
                 // Update orders
                 const updated = categories.map((c, i) => ({ ...c, order: i }));
-                await updateDoc(yearRef, { categories: updated });
+                await updateDoc(compRef, { categories: updated });
             }
         }
     },
 
-    sortCategoriesByName: async (yearId, direction = 'asc') => {
-        const yearRef = doc(db, 'years', yearId);
-        const yearSnap = await getDoc(yearRef);
-        if (yearSnap.exists()) {
-            const categories = [...yearSnap.data().categories]
+    sortCategoriesByName: async (compId, direction = 'asc') => {
+        const compRef = doc(db, 'competitions', compId);
+        const compSnap = await getDoc(compRef);
+        if (compSnap.exists()) {
+            const categories = [...compSnap.data().categories]
                 .sort((a, b) => {
                     const res = a.name.localeCompare(b.name, 'ko');
                     return direction === 'asc' ? res : -res;
                 })
                 .map((c, i) => ({ ...c, order: i }));
-            await updateDoc(yearRef, { categories });
+            await updateDoc(compRef, { categories: categories });
         }
     },
 
-    toggleYearLock: async (yearId, isLocked) => {
-        const yearRef = doc(db, 'years', yearId);
-        const yearSnap = await getDoc(yearRef);
+    toggleCompetitionLock: async (compId, isLocked) => {
+        const compRef = doc(db, 'competitions', compId);
+        const compSnap = await getDoc(compRef);
 
-        if (yearSnap.exists()) {
-            const data = yearSnap.data();
-            // Cascade: Update all categories to match the year's lock status
-            // Priority: Year Lock overrides individual category locks
+        if (compSnap.exists()) {
+            const data = compSnap.data();
+            // Cascade: Update all categories to match the competition's lock status
             const updatedCategories = (data.categories || []).map(cat => ({
                 ...cat,
                 locked: isLocked
             }));
 
-            await updateDoc(yearRef, {
+            await updateDoc(compRef, {
                 locked: isLocked,
                 categories: updatedCategories
             });
         }
     },
 
-    updateCategory: async (yearId, categoryId, newName) => {
+    updateCategory: async (compId, categoryId, newName) => {
         const batch = writeBatch(db);
-        const yearRef = doc(db, 'years', yearId);
-        const yearSnap = await getDoc(yearRef);
-        if (yearSnap.exists()) {
+        const compRef = doc(db, 'competitions', compId);
+        const compSnap = await getDoc(compRef);
+        if (compSnap.exists()) {
             const parts = newName.split(' ');
             const newGenre = parts.length > 1 ? parts[0] : 'General';
             const newCategory = parts.length > 1 ? parts.slice(1).join(' ') : newName;
 
-            const categories = (yearSnap.data().categories || []).map(c =>
+            const categories = (compSnap.data().categories || []).map(c =>
                 c.id === categoryId ? { ...c, name: newName, genre: newGenre, category: newCategory } : c
             );
-            batch.update(yearRef, { categories });
+            batch.update(compRef, { categories });
 
             // Cascading update for participants and scores
             const pSnap = await getDocs(query(collection(db, 'participants'), where('categoryId', '==', categoryId)));
@@ -493,67 +525,89 @@ const useStore = create((set, get) => ({
         }
     },
 
-    deleteCategory: async (yearId, categoryId) => {
+    deleteCategory: async (compId, categoryId) => {
+        console.log(`[Store] deleteCategory START: comp=${compId}, cat=${categoryId}`);
+        const { currentUser } = get();
+        if (!currentUser) {
+            console.error('[Store] deleteCategory: No currentUser found');
+            return;
+        }
+
         try {
-            const batch = writeBatch(db);
-            const yearRef = doc(db, 'years', yearId);
-            const yearSnap = await getDoc(yearRef);
-            if (yearSnap.exists()) {
-                const categories = (yearSnap.data().categories || []).filter(c => c.id !== categoryId);
-                batch.update(yearRef, { categories });
+            // 1. Delete all scores for this category
+            console.log('[Store] deleteCategory: deleting scores');
+            const scoresQuery = query(collection(db, 'scores'), where('categoryId', '==', categoryId));
+            const scoresSnap = await getDocs(scoresQuery);
+            const scoreDeletes = scoresSnap.docs.map(d => deleteDoc(d.ref));
+            await Promise.all(scoreDeletes);
 
-                // Delete participants and scores
-                const pSnap = await getDocs(query(collection(db, 'participants'), where('categoryId', '==', categoryId)));
-                pSnap.docs.forEach(d => batch.delete(d.ref));
+            // 2. Delete all participants for this category
+            console.log('[Store] deleteCategory: deleting participants');
+            const partsQuery = query(collection(db, 'participants'), where('categoryId', '==', categoryId));
+            const partsSnap = await getDocs(partsQuery);
+            const partDeletes = partsSnap.docs.map(d => deleteDoc(d.ref));
+            await Promise.all(partDeletes);
 
-                const sSnap = await getDocs(query(collection(db, 'scores'), where('categoryId', '==', categoryId)));
-                sSnap.docs.forEach(d => batch.delete(d.ref));
-
-                await batch.commit();
+            // 3. Remove from competition's categories array
+            console.log('[Store] deleteCategory: removing from competitions array');
+            const compRef = doc(db, 'competitions', compId);
+            const compSnap = await getDoc(compRef);
+            if (compSnap.exists()) {
+                const compData = compSnap.data();
+                const updatedCategories = (compData.categories || []).filter(c => c.id !== categoryId);
+                await updateDoc(compRef, { categories: updatedCategories });
+                console.log('[Store] deleteCategory: updated competitions array');
             }
+
+            // 4. If this was the active category, reset navigation
+            if (get().selectedCategoryId === categoryId) {
+                console.log('[Store] deleteCategory: resetting navigation');
+                get().resetNavigation();
+            }
+            console.log('[Store] deleteCategory: END');
         } catch (error) {
-            console.error('[Store] deleteCategory failed:', error);
-            alert('종목 삭제 중 오류가 발생했습니다: ' + error.message);
+            console.error('[Store] deleteCategory ERROR:', error);
+            throw error;
         }
     },
 
-    updateCategoriesOrder: async (yearId, newCategories) => {
-        const yearRef = doc(db, 'years', yearId);
+    updateCategoriesOrder: async (compId, newCategories) => {
+        const compRef = doc(db, 'competitions', compId);
         // Ensure to save normalized categories with correct order indexes
         const normalized = newCategories.map((cat, index) => ({
             ...cat,
             order: index
         }));
-        await updateDoc(yearRef, { categories: normalized });
+        await updateDoc(compRef, { categories: normalized });
     },
 
 
 
-    toggleCategoryLock: async (yearId, categoryId, isLocked) => {
-        const yearRef = doc(db, 'years', yearId);
-        const yearSnap = await getDoc(yearRef);
-        if (yearSnap.exists()) {
-            const categories = (yearSnap.data().categories || []).map(c =>
+    toggleCategoryLock: async (compId, categoryId, isLocked) => {
+        const compRef = doc(db, 'competitions', compId);
+        const compSnap = await getDoc(compRef);
+        if (compSnap.exists()) {
+            const categories = (compSnap.data().categories || []).map(c =>
                 c.id === categoryId ? { ...c, locked: isLocked } : c
             );
-            await updateDoc(yearRef, { categories });
+            await updateDoc(compRef, { categories });
         }
     },
 
     // Judge Actions
-    addJudge: async (yearId, email, name) => {
+    addJudge: async (compId, email, name) => {
         const lowerEmail = email.toLowerCase();
-        await setDoc(doc(db, 'judges', `${yearId}_${lowerEmail}`), { yearId, email: lowerEmail, name });
+        await setDoc(doc(db, 'judges', `${compId}_${lowerEmail}`), { compId, email: lowerEmail, name });
     },
 
-    removeJudge: async (yearId, email) => {
-        await deleteDoc(doc(db, 'judges', `${yearId}_${email.toLowerCase()}`));
+    removeJudge: async (compId, email) => {
+        await deleteDoc(doc(db, 'judges', `${compId}_${email.toLowerCase()}`));
     },
 
-    anonymizeJudge: async (yearId, email) => {
+    anonymizeJudge: async (compId, email) => {
         const lowerEmail = email.toLowerCase();
-        const judgeRef = doc(db, 'judges', `${yearId}_${lowerEmail}`);
-        // Only update the name, keep everything else (email, yearId, submitted status)
+        const judgeRef = doc(db, 'judges', `${compId}_${lowerEmail}`);
+        // Only update the name, keep everything else (email, compId, submitted status)
         await setDoc(judgeRef, { name: '알수 없음' }, { merge: true });
     },
 
@@ -570,17 +624,17 @@ const useStore = create((set, get) => ({
     // Participant Actions
     addParticipant: async (categoryId, number, name) => {
         const id = Math.random().toString(36).substr(2, 9);
-        const { years } = get();
+        const { competitions } = get();
 
         // Find info from state
-        let yearName = '?';
+        let compName = '?';
         let genre = 'General';
         let category = 'None';
 
-        for (const y of years) {
+        for (const y of competitions) {
             const cat = (y.categories || []).find(c => c.id === categoryId);
             if (cat) {
-                yearName = y.name;
+                compName = y.name;
                 genre = cat.genre || 'General';
                 category = cat.category || cat.name;
                 break;
@@ -590,7 +644,7 @@ const useStore = create((set, get) => ({
         await setDoc(doc(db, 'participants', `${categoryId}_${id}`), {
             id,
             categoryId,
-            year: yearName,
+            competition: compName,
             genre,
             category,
             number,
@@ -599,15 +653,15 @@ const useStore = create((set, get) => ({
         });
     },
 
-    getParticipantsByYear: (year) => {
+    getParticipantsByComp: (compId) => {
         const { participants } = get();
-        const allByYear = [];
+        const allByComp = [];
         Object.keys(participants).forEach(catId => {
-            if (catId.startsWith(year)) {
-                allByYear.push(...participants[catId]);
+            if (catId.startsWith(compId)) {
+                allByComp.push(...participants[catId]);
             }
         });
-        return allByYear;
+        return allByComp;
     },
 
     // Data Management Actions
@@ -620,14 +674,15 @@ const useStore = create((set, get) => ({
 
             // Fetch all collections
             for (const collName of collections) {
-                const snap = await getDocs(collection(db, collName));
+                const snap = await getDocs(collection(db, collName === 'years' ? 'competitions' : collName));
                 if (collName === 'judges') {
-                    // Reconstruct judgesByYear map
-                    data.judgesByYear = {};
+                    // Reconstruct judgesByComp map
+                    data.judgesByComp = {};
                     snap.docs.forEach(doc => {
                         const j = doc.data();
-                        if (!data.judgesByYear[j.yearId]) data.judgesByYear[j.yearId] = [];
-                        data.judgesByYear[j.yearId].push(j);
+                        const compId = j.compId || j.yearId; // Support legacy
+                        if (!data.judgesByComp[compId]) data.judgesByComp[compId] = [];
+                        data.judgesByComp[compId].push(j);
                     });
                 } else if (collName === 'participants') {
                     // Reconstruct participants map
@@ -649,7 +704,7 @@ const useStore = create((set, get) => ({
                         data.scores[s.categoryId][s.participantId][s.judgeEmail] = s.values;
                     });
                 } else {
-                    // years, admins
+                    // competitions, admins
                     data[collName] = snap.docs.map(doc => doc.data());
                 }
             }
@@ -663,11 +718,11 @@ const useStore = create((set, get) => ({
 
             // Construct final export object matching previous structure
             const exportObj = {
-                version: "1.4", // Version bump for full async export
+                version: "1.5", // Version bump for refactoring
                 timestamp: new Date().toISOString(),
-                years: data.years || [],
+                competitions: data.years || data.competitions || [],
                 participants: data.participants || {},
-                judgesByYear: data.judgesByYear || {},
+                judgesByComp: data.judgesByComp || {},
                 admins: data.admins || [],
                 scores: data.scores || {},
                 settings: {
@@ -729,12 +784,15 @@ const useStore = create((set, get) => ({
                 }
             }
 
-            // 2. Import Years & Categories
-            if (data.years) {
-                data.years.forEach(year => {
-                    batch.set(doc(db, 'years', year.id), year);
-                });
-            }
+            // 2. Import Competitions & Categories
+            const compList = data.competitions || data.years || [];
+            compList.forEach(comp => {
+                // Ensure no 'year' in categories
+                const cleanedCategories = (comp.categories || []).map(({ year, ...rest }) => rest);
+                const cleanedComp = { ...comp, categories: cleanedCategories };
+                if (!cleanedComp.createdAt) cleanedComp.createdAt = new Date().toISOString();
+                batch.set(doc(db, 'competitions', comp.id), cleanedComp);
+            });
 
             // 3. Import Participants
             if (data.participants) {
@@ -746,9 +804,10 @@ const useStore = create((set, get) => ({
                     if (!p.id || !p.categoryId) return;
                     const parts = p.categoryId.split('-');
                     const docId = `${p.categoryId}_${p.id}`;
+                    const { year, ...rest } = p; // Remove year field
                     batch.set(doc(db, 'participants', docId), {
-                        ...p,
-                        year: p.year || parts[0],
+                        ...rest,
+                        competition: p.competition || p.year || parts[0],
                         genre: p.genre || (parts.slice(1).join(' ').split(' ')[0] || 'General'),
                         category: p.category || (parts.slice(1).join(' ').split(' ').slice(1).join(' ') || parts.slice(1).join(' '))
                     });
@@ -756,10 +815,13 @@ const useStore = create((set, get) => ({
             }
 
             // 4. Import Judges
-            if (data.judgesByYear) {
-                Object.entries(data.judgesByYear).forEach(([yearId, judges]) => {
+            const judgesSource = data.judgesByComp || data.judgesByYear;
+            if (judgesSource) {
+                Object.entries(judgesSource).forEach(([compId, judges]) => {
                     judges.forEach(j => {
-                        batch.set(doc(db, 'judges', `${yearId}_${j.email.replace(/\./g, '_')}`), { ...j, yearId });
+                        const { yearId, ...rest } = j;
+                        const finalId = rest.compId || compId;
+                        batch.set(doc(db, 'judges', `${finalId}_${j.email.replace(/\./g, '_')}`), { ...rest, compId: finalId });
                     });
                 });
             }
@@ -804,7 +866,8 @@ const useStore = create((set, get) => ({
 
         try {
             console.log('[Store] Full Database Reset initiated...');
-            const collections = ['years', 'participants', 'judges', 'scores', 'admins'];
+            // Include legacy collections (scoringItems, test_collection) for a truly clean wipe
+            const collections = ['competitions', 'years', 'participants', 'judges', 'scores', 'admins', 'settings', 'scoringItems', 'test_collection'];
 
             for (const collName of collections) {
                 set({ resetStatus: `${collName} 컬렉션 삭제 중...` });
@@ -825,17 +888,13 @@ const useStore = create((set, get) => ({
             set({ resetStatus: '설정 초기화 중...' });
             const settingsBatch = writeBatch(db);
             // Reset competition name to default
-            settingsBatch.set(doc(db, 'settings', 'general'), { competitionName: 'Korea Latin Dance Cup' });
-            // Also reset scoring items to defaults
-            const defaultScoring = [
-                { id: 'tech', label: '기술점수', order: 0 },
-                { id: 'art', label: '예술점수', order: 1 },
-            ];
-            settingsBatch.set(doc(db, 'settings', 'scoring'), { items: defaultScoring });
+            settingsBatch.set(doc(db, 'settings', 'general'), { competitionName: 'Latin Dance Score System' });
+
+            settingsBatch.set(doc(db, 'settings', 'scoring'), { items: [] });
             await settingsBatch.commit();
 
-            set({ resetStatus: '기본 데이터 생성 중...' });
-            await get().initDefaults();
+            set({ resetStatus: '데이터 정제 완료' });
+            // Removed: await get().initDefaults(); - No longer creating default years/categories
 
             console.log('[Store] Full Database Reset complete.');
             set({ resetStatus: '완료!' });
@@ -853,7 +912,7 @@ const useStore = create((set, get) => ({
         let updateCount = 0;
 
         const collections = [
-            { coll: 'judges', idField: (data) => `${data.yearId}_${data.email.toLowerCase()}`, emailField: 'email' },
+            { coll: 'judges', idField: (data) => `${data.compId || data.yearId}_${data.email.toLowerCase()}`, emailField: 'email' },
             { coll: 'admins', idField: (data) => data.email.toLowerCase(), emailField: 'email' }
         ];
 
@@ -922,10 +981,10 @@ const useStore = create((set, get) => ({
         await batch.commit();
     },
 
-    seedRandomScores: async (yearId) => {
-        const { years, participants, scoringItems } = get();
-        const year = years.find(y => y.id === yearId);
-        if (!year) return;
+    seedRandomScores: async (compId) => {
+        const { competitions, participants, scoringItems } = get();
+        const comp = competitions.find(c => c.id === compId);
+        if (!comp) return;
 
         const batch = writeBatch(db);
         const mockJudges = [
@@ -933,13 +992,13 @@ const useStore = create((set, get) => ({
             { email: 'ilrujer@gmail.com', name: '염은영' }
         ];
 
-        for (const cat of year.categories) {
+        for (const cat of comp.categories) {
             const catParticipants = participants[cat.id] || [];
 
-            // Also ensure these judges are registered for the year in the DB
+            // Also ensure these judges are registered for the competition in the DB
             for (const judge of mockJudges) {
-                const judgeRef = doc(db, 'judges', `${yearId}_${judge.email}`);
-                batch.set(judgeRef, { yearId, email: judge.email, name: judge.name });
+                const judgeRef = doc(db, 'judges', `${compId}_${judge.email}`);
+                batch.set(judgeRef, { compId, email: judge.email, name: judge.name });
             }
 
             for (const p of catParticipants) {
@@ -958,13 +1017,13 @@ const useStore = create((set, get) => ({
         await batch.commit();
     },
 
-    clearYearScores: async (yearId) => {
-        const { years } = get();
-        const year = years.find(y => y.id === yearId);
-        if (!year) return;
+    clearCompetitionScores: async (compId) => {
+        const { competitions } = get();
+        const comp = competitions.find(c => c.id === compId);
+        if (!comp) return;
 
         const batch = writeBatch(db);
-        const categoryIds = (year.categories || []).map(c => c.id);
+        const categoryIds = (comp.categories || []).map(c => c.id);
 
         for (const catId of categoryIds) {
             const q = query(collection(db, 'scores'), where('categoryId', '==', catId));
@@ -1050,7 +1109,7 @@ const useStore = create((set, get) => ({
             if (docSnap.exists()) {
                 set({ competitionName: docSnap.data().competitionName || 'New Competition' });
             } else {
-                setDoc(doc(db, 'settings', 'general'), { competitionName: 'Korea Latin Dance Cup' });
+                setDoc(doc(db, 'settings', 'general'), { competitionName: 'Score System' });
             }
         });
 
@@ -1059,17 +1118,13 @@ const useStore = create((set, get) => ({
             if (docSnap.exists()) {
                 set({ scoringItems: docSnap.data().items || [] });
             } else {
-                // Initialize default scoring items if not exists
-                const defaults = [
-                    { id: 'tech', label: '기술점수', order: 0 },
-                    { id: 'art', label: '예술점수', order: 1 },
-                ];
-                setDoc(doc(db, 'settings', 'scoring'), { items: defaults });
+                // Initialize with empty array if not exists
+                setDoc(doc(db, 'settings', 'scoring'), { items: [] });
             }
         });
 
         // Local scoped sync tracker
-        let collectionsSynced = { years: false, judges: false, participants: false, admins: false };
+        let collectionsSynced = { competitions: false, judgesByComp: false, participants: false, admins: false };
         const checkAllSynced = (key) => {
             collectionsSynced[key] = true;
             if (Object.values(collectionsSynced).every(v => v)) {
@@ -1087,27 +1142,24 @@ const useStore = create((set, get) => ({
             }
         }, 5000);
 
-        onSnapshot(collection(db, 'years'), (snapshot) => {
-            const years = snapshot.docs.map(doc => doc.data());
-            set({ years: years.sort((a, b) => b.name.localeCompare(a.name)) });
-            if (years.length === 0 && !get().isInitializingDefaults) {
-                get().initDefaults();
-            }
-            checkAllSynced('years');
+        onSnapshot(collection(db, 'competitions'), (snapshot) => {
+            const competitions = snapshot.docs.map(doc => doc.data());
+            set({ competitions: competitions.sort((a, b) => b.name.localeCompare(a.name)) });
+            checkAllSynced('competitions');
         });
 
-        // Sync Judges
         onSnapshot(collection(db, 'judges'), (snapshot) => {
             const grouped = {};
             snapshot.docs.forEach(doc => {
                 const j = doc.data();
                 const normalizedJudge = { ...j, email: j.email.toLowerCase() };
-                if (!grouped[j.yearId]) grouped[j.yearId] = [];
-                grouped[j.yearId].push(normalizedJudge);
+                const compId = j.compId || j.yearId;
+                if (!grouped[compId]) grouped[compId] = [];
+                grouped[compId].push(normalizedJudge);
             });
-            set({ judgesByYear: grouped });
+            set({ judgesByComp: grouped });
             get().syncUserRole();
-            checkAllSynced('judges');
+            checkAllSynced('judgesByComp');
         });
 
         // Sync Participants
@@ -1135,7 +1187,7 @@ const useStore = create((set, get) => ({
                             ...p,
                             id: p.id || pId.split('_').pop(),
                             categoryId: catId,
-                            year: p.year || parts[0],
+                            competition: p.competition || p.year || parts[0],
                             genre: p.genre || (parts.slice(1).join(' ').split(' ')[0] || 'General'),
                             category: p.category || (parts.slice(1).join(' ').split(' ').slice(1).join(' ') || parts.slice(1).join(' '))
                         };
@@ -1177,37 +1229,28 @@ const useStore = create((set, get) => ({
     initDefaults: async () => {
         if (get().isInitializingDefaults) return;
         set({ isInitializingDefaults: true });
-        console.log('[Store] Initializing default data...');
 
         try {
-            const defaultCats = [
-                'Salsa Couple', 'Bachata Couple', 'Salsa Shine Solo Man',
-                'Salsa Shine Solo Woman', 'Salsa Shine Duo', 'Bachata Shine Duo',
-                'Salsa Group', 'Bachata Group', 'Senior 종합'
-            ];
-            const yearsList = ['2024', '2025', '2026'];
+            // Check if any competitions exist
+            const q = query(collection(db, 'competitions'));
+            const snapshot = await getDocs(q);
 
-            const batch = writeBatch(db);
+            if (snapshot.empty) {
+                console.log('[Store] No competitions found. Initializing defaults...');
+                const defaultCompId = 'comp-2024';
 
-            for (const year of yearsList) {
-                const yearId = Math.random().toString(36).substr(2, 9);
-                const categories = defaultCats.map((name, i) => {
-                    const parts = name.split(' ');
-                    const genre = parts.length > 1 ? parts[0] : 'General';
-                    const category = parts.length > 1 ? parts.slice(1).join(' ') : name;
-                    return {
-                        id: Math.random().toString(36).substr(2, 9),
-                        name,
-                        genre,
-                        category,
-                        year: year,
-                        order: i
-                    };
+                // Initial Competition
+                await setDoc(doc(db, 'competitions', defaultCompId), {
+                    name: '2024 Latin Dance Festival',
+                    locked: false,
+                    createdAt: new Date().toISOString(),
+                    categories: [
+                        { id: 'cat-pro-latin', name: 'Professional Latin', genre: 'Professional', category: 'Latin', order: 0, locked: false },
+                        { id: 'cat-pro-am-latin', name: 'Pro-Am Latin', genre: 'Pro-Am', category: 'Latin', order: 1, locked: false }
+                    ]
                 });
-                batch.set(doc(db, 'years', yearId), { id: yearId, name: year, categories, locked: false });
+                console.log('[Store] Default competition initialized.');
             }
-            await batch.commit();
-            console.log('[Store] Default data initialized.');
         } catch (error) {
             console.error('[Store] initDefaults failed:', error);
         } finally {
