@@ -59,7 +59,6 @@ const Scorer = () => {
         isLocked,
         isCompLocked,
         isCategoryLocked,
-        isCategoryLocked,
         selectedCategoryId
     });
 
