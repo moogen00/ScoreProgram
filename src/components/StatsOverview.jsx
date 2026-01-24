@@ -5,6 +5,7 @@ import useStore from '../store/useStore';
 const StatsOverview = ({ compId }) => {
     const { competitions, scores, judgesByComp } = useStore();
 
+    // 실시간 통계 계산 (Progress, Active Judges, Participants)
     const stats = useMemo(() => {
         if (!compId) return null;
 
@@ -18,22 +19,23 @@ const StatsOverview = ({ compId }) => {
 
         categories.forEach(cat => {
             const catScores = scores[cat.id] || {};
-            // catScores: { [pId]: { [judgeEmail]: { ...values } } }
+            // catScores 구조: { [pId]: { [judgeEmail]: { ...values } } }
 
+            // 실제 채점된 수 계산
             Object.values(catScores).forEach(pScores => {
                 Object.keys(pScores).forEach(email => {
                     activeJudgeEmails.add(email.toLowerCase());
-                    totalCompleted++; // One "score entry" (one judge scoring one participant)
+                    totalCompleted++; // 심사위원 1명의 1개 참가자 채점 = 1 count
                 });
             });
 
-            // Total Required = Participants in Cat * Judges Assigned
+            // 필요 총 채점 수 = (참가자 수) * (배정된 심사위원 수)
             const participantsCount = useStore.getState().participants[cat.id]?.length || 0;
             const judgesCount = judges.length;
             totalRequired += participantsCount * judgesCount;
         });
 
-        // Sum participants across all categories in this competition
+        // 대회 내 모든 종목 참가자 합계
         const totalParticipants = categories.reduce((sum, cat) => {
             return sum + (useStore.getState().participants[cat.id]?.length || 0);
         }, 0);

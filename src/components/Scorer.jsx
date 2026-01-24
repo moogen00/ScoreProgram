@@ -16,18 +16,19 @@ const Scorer = () => {
         console.log(`[Scorer] Participants for ${selectedCategoryId}:`, participants[selectedCategoryId]);
     }
 
+    // 참가자 목록 Memoization
     const categoryParticipants = useMemo(() => participants[selectedCategoryId] || [], [participants, selectedCategoryId]);
-    // localScores structure: { [participantId]: { [itemId]: value } }
+    // 로컬 입력 상태 관리: { [participantId]: { [itemId]: value } }
     const [localScores, setLocalScores] = useState({});
     const [isSaving, setIsSaving] = useState(false);
 
-    // Initial check logic
+    // 초기 상태 체크 로직
     const currentComp = useMemo(() => competitions.find(y => y.categories?.some(c => c.id === selectedCategoryId)), [competitions, selectedCategoryId]);
     const currentCompId = currentComp?.id;
     const categoryName = useMemo(() => currentComp?.categories?.find(c => c.id === selectedCategoryId)?.name || '', [currentComp, selectedCategoryId]);
     const isSolo = useMemo(() => categoryName.toUpperCase().includes('SOLO'), [categoryName]);
 
-    // Auth & Lock logic
+    // 권한 및 잠금 상태 로직
     const isCompLocked = currentComp?.locked;
     const isCategoryLocked = currentComp?.categories?.find(c => c.id === selectedCategoryId)?.locked;
     const isAdmin = currentUser?.role === 'ADMIN' || currentUser?.role === 'ROOT_ADMIN';
@@ -35,6 +36,7 @@ const Scorer = () => {
     const isSpectator = currentUser?.role === 'SPECTATOR';
     const isJudgeForThisComp = judgesByComp[currentCompId]?.some(j => j.email === currentUser?.email);
 
+    // 현재 사용자가 이미 제출했는지 확인
     const myJudgeRecord = useMemo(() => judgesByComp[currentCompId]?.find(j => j.email === currentUser?.email), [judgesByComp, currentCompId, currentUser]);
     const isSubmitted = myJudgeRecord?.submittedCategories?.[selectedCategoryId] || false;
 
@@ -57,10 +59,11 @@ const Scorer = () => {
         isLocked,
         isCompLocked,
         isCategoryLocked,
+        isCategoryLocked,
         selectedCategoryId
     });
 
-    // Initialize local scores from store
+    // 스토어 점수와 로컬 입력 상태 동기화 (초기 진입 시)
     useEffect(() => {
         if (!selectedCategoryId || !currentUser) return;
 
@@ -72,9 +75,11 @@ const Scorer = () => {
         setLocalScores(initialScores);
     }, [selectedCategoryId, currentUser, scores, categoryParticipants]);
 
+    // 점수 입력 핸들러 (실시간 입력 제한 및 로컬 상태 업데이트)
     const handleScoreChange = (participantId, itemId, val) => {
         if (isLocked) return;
 
+        // 빈 값 처리 (지우기 허용)
         if (val === '') {
             setLocalScores(prev => ({
                 ...prev,
@@ -83,7 +88,7 @@ const Scorer = () => {
             return;
         }
 
-        // Regex to allow only numbers and at most 1 decimal place
+        // 입력 제한 정규식: 숫자만 허용, 소수점은 최대 1자리까지만 허용
         if (!/^\d*\.?\d{0,1}$/.test(val)) return;
 
         let num = parseFloat(val);
@@ -96,6 +101,7 @@ const Scorer = () => {
         }));
     };
 
+    // 제출 / 수정하기 토글 핸들러
     const handleToggleSubmit = async () => {
         if (isGlobalLocked && !isAdmin) return; // Cannot toggle if globally locked
 
@@ -121,6 +127,7 @@ const Scorer = () => {
         }
     };
 
+    // 개별 참가자 총점 계산 (로컬 상태 기준)
     const calculateTotal = useCallback((pId, scoresObj = localScores) => {
         const pScores = scoresObj[pId] || {};
         return Object.values(pScores).reduce((sum, val) => {
@@ -129,8 +136,10 @@ const Scorer = () => {
         }, 0).toFixed(1);
     }, [localScores]);
 
-    // Sort scoring items
-    // Helper to get total score for sorting/display
+    // scoringItems 정렬
+    // 참가자 총점 조회 (관리자/관중 vs 심사위원 분기 처리)
+    // - 관리자/관중(Locked): 모든 심사위원 평균 합산
+    // - 심사위원: 본인의 점수 합산
     const getParticipantTotal = useCallback((pId) => {
         // Condition: Admin (Monitoring) OR Spectator (Locked) OR Admin (Locked - rare)
         // Basically if we are showing averages, we calculate total from averages.
@@ -153,7 +162,7 @@ const Scorer = () => {
         }
     }, [isAdmin, isSpectator, isLocked, isJudgeForThisComp, scores, selectedCategoryId, calculateTotal]);
 
-    // Helper for Admin View
+    // 관리자용 세부 통계 계산 (항목별 평균 및 심사위원별 점수 내역)
     const getAdminItemStats = useCallback((pId, itemId) => {
         const pScoresByJudge = scores[selectedCategoryId]?.[pId] || {};
         const compJudges = judgesByComp?.[currentCompId] || [];
@@ -186,16 +195,16 @@ const Scorer = () => {
         return stats;
     }, [scores, selectedCategoryId, judgesByComp, currentCompId]);
 
-    // Helper for Spectator Item View
+    // 관중용 항목별 평균 점수 조회
     const getAverageItemScore = useCallback((pId, itemId) => {
         const stats = getAdminItemStats(pId, itemId);
         return stats.avg > 0 ? stats.avg.toFixed(2) : '-';
     }, [getAdminItemStats]);
 
-    // Sort scoring items
+    // 채점 항목 정렬 (Order 기준)
     const sortedItems = [...scoringItems].sort((a, b) => a.order - b.order);
 
-    // Sort participants by average score and compute ranks efficiently
+    // 참가자 랭킹 계산 (평균 점수 기준 내림차순 정렬)
     const rankedParticipants = useMemo(() => {
         if (categoryParticipants.length === 0) return [];
 
@@ -220,12 +229,12 @@ const Scorer = () => {
         }));
     }, [categoryParticipants, getParticipantTotal]);
 
-    // Top Ranked for Widget (from ranked list)
+    // 상위 3명 랭킹 위젯용 데이터
     const topRanked = useMemo(() => {
         return rankedParticipants.slice(0, 3).filter(p => (typeof p.rank === 'number'));
     }, [rankedParticipants]);
 
-    // For tables that need numeric (participant number) sorting but with ranks
+    // 참가자 번호순 정렬 (테이블 표시용)
     const participantsSortedByNumber = useMemo(() => {
         return [...rankedParticipants].sort((a, b) => {
             const numA = parseInt(a.number || 0, 10);

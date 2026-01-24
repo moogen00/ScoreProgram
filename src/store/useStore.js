@@ -39,9 +39,9 @@ const useStore = create((set, get) => ({
 
     adminTab: 'scoring',
 
-    // Auth Actions
+    // 인증 관련 액션 (로그인 처리)
     login: (userData) => {
-        // If userData has a role (e.g. from Spectator login), use it. Default to USER.
+        // 사용자 데이터에 역할(role)이 있으면 사용 (예: Spectator), 없으면 기본값 USER
         const role = userData.role || 'USER';
         // Normalize email to lowercase
         const normalizedData = {
@@ -57,6 +57,7 @@ const useStore = create((set, get) => ({
         // Force refresh scores to ensure we get data if rules were restrictive before login
         get().refreshScores();
     },
+    // 로그아웃 처리
     logout: () => {
         set({ currentUser: null });
         localStorage.removeItem('score_program_user');
@@ -66,6 +67,10 @@ const useStore = create((set, get) => ({
         set({ scores: {}, unsubScores: null });
     },
 
+    // 사용자 역할(Role) 동기화 및 권한 부여
+    // 1. Root Admin 확인
+    // 2. 일반 Admin 확인
+    // 3. 심사위원(Judge) 확인 및 배정된 대회 목록 갱신
     syncUserRole: () => {
         const { currentUser, judgesByComp, admins } = get();
         if (!currentUser) return;
@@ -152,10 +157,12 @@ const useStore = create((set, get) => ({
         }
     },
 
-    // Settings Actions
+    // 설정 관련 액션
+    // 대회명 설정
     setCompetitionName: async (name) => {
         await setDoc(doc(db, 'settings', 'general'), { competitionName: name }, { merge: true });
     },
+    // 현재 선택된 종목 ID 설정 (URI 상태 동기화 포함)
     setSelectedCategoryId: (id) => {
         set({ selectedCategoryId: id });
         window.history.pushState({
@@ -164,6 +171,7 @@ const useStore = create((set, get) => ({
             adminTab: get().adminTab
         }, '');
     },
+    // 활성화된 뷰(화면) 설정 (URI 상태 동기화 포함)
     setActiveView: (view) => {
         set({ activeView: view });
         window.history.pushState({
@@ -172,6 +180,7 @@ const useStore = create((set, get) => ({
             adminTab: get().adminTab
         }, '');
     },
+    // 관리자 패널 탭 설정 (URI 상태 동기화 포함)
     setAdminTab: (tab) => {
         set({ adminTab: tab });
         window.history.pushState({
@@ -180,6 +189,7 @@ const useStore = create((set, get) => ({
             adminTab: tab
         }, '');
     },
+    // 네비게이션 상태 초기화
     resetNavigation: () => {
         set({ activeView: null, selectedCategoryId: '', adminTab: 'scoring' });
         window.history.pushState({
@@ -189,7 +199,7 @@ const useStore = create((set, get) => ({
         }, '');
     },
 
-    // Scorer Actions
+    // 점수 입력/수정 액션 (실시간 DB 업데이트)
     updateScore: async (categoryId, participantId, itemId, score) => {
         // ... (kept for backward compatibility or single updates if needed)
         const { currentUser, competitions } = get();
@@ -233,6 +243,7 @@ const useStore = create((set, get) => ({
         }, { merge: true });
     },
 
+    // 카테고리별 점수 일괄 제출 (저장 및 제출 상태 변경)
     submitCategoryScores: async (categoryId, scoresMap) => {
         const { currentUser, competitions } = get();
         const isAdmin = currentUser?.role === 'ADMIN' || currentUser?.role === 'ROOT_ADMIN';
@@ -297,6 +308,7 @@ const useStore = create((set, get) => ({
         await batch.commit();
     },
 
+    // 심사위원 제출 상태 토글 (제출 취소 및 수정 모드 전환)
     toggleJudgeSubmission: async (categoryId, isSubmitted) => {
         const { currentUser, competitions } = get();
         // Find context for compId
@@ -328,7 +340,8 @@ const useStore = create((set, get) => ({
         console.log(`[Store] Judge submission toggled: ${categoryId} -> ${isSubmitted}`);
     },
 
-    // Management Actions
+    // 관리 관련 액션
+    // 새로운 채점 항목 추가
     addScoringItem: async (label) => {
         const item = {
             id: Math.random().toString(36).substr(2, 9),
@@ -338,16 +351,19 @@ const useStore = create((set, get) => ({
         await setDoc(doc(db, 'settings', 'scoring'), { items: [...get().scoringItems, item] });
     },
 
+    // 채점 항목 삭제
     removeScoringItem: async (id) => {
         const items = get().scoringItems.filter(item => item.id !== id);
         await setDoc(doc(db, 'settings', 'scoring'), { items });
     },
 
+    // 채점 항목 순서 변경
     updateScoringItemOrder: async (newItems) => {
         await setDoc(doc(db, 'settings', 'scoring'), { items: newItems });
     },
 
-    // Hierarchy Actions
+    // 계층 구조(대회) 관리 액션
+    // 새 대회 추가
     addCompetition: async (name) => {
         const id = Math.random().toString(36).substr(2, 9);
         const comp = {
@@ -360,6 +376,7 @@ const useStore = create((set, get) => ({
         await setDoc(doc(db, 'competitions', id), comp);
     },
 
+    // 대회명 수정 (하위 데이터 일괄 업데이트 포함)
     updateCompetition: async (compId, newName) => {
         const batch = writeBatch(db);
         const compRef = doc(db, 'competitions', compId);
@@ -388,6 +405,7 @@ const useStore = create((set, get) => ({
         await batch.commit();
     },
 
+    // 대회 삭제 (하위 모든 데이터 - 심사위원, 참가자, 점수 포함 삭제)
     deleteCompetition: async (compId) => {
         try {
             console.log(`[Store] Deleting competition: ${compId}`);
@@ -425,6 +443,7 @@ const useStore = create((set, get) => ({
         }
     },
 
+    // 종목(Category) 추가
     addCategory: async (compId, name) => {
         const catId = Math.random().toString(36).substr(2, 9);
         const compRef = doc(db, 'competitions', compId);
@@ -453,6 +472,7 @@ const useStore = create((set, get) => ({
         }
     },
 
+    // 종목 순서 이동 (위/아래)
     moveCategory: async (compId, catId, direction) => {
         const compRef = doc(db, 'competitions', compId);
         const compSnap = await getDoc(compRef);
@@ -469,6 +489,7 @@ const useStore = create((set, get) => ({
         }
     },
 
+    // 종목 이름순 정렬
     sortCategoriesByName: async (compId, direction = 'asc') => {
         const compRef = doc(db, 'competitions', compId);
         const compSnap = await getDoc(compRef);
@@ -483,6 +504,7 @@ const useStore = create((set, get) => ({
         }
     },
 
+    // 대회 잠금/해제 토글 (하위 모든 종목 잠금 상태 동기화)
     toggleCompetitionLock: async (compId, isLocked) => {
         const compRef = doc(db, 'competitions', compId);
         const compSnap = await getDoc(compRef);
@@ -502,6 +524,7 @@ const useStore = create((set, get) => ({
         }
     },
 
+    // 종목 정보 수정 (이름 변경 등)
     updateCategory: async (compId, categoryId, newName) => {
         const batch = writeBatch(db);
         const compRef = doc(db, 'competitions', compId);
@@ -527,6 +550,7 @@ const useStore = create((set, get) => ({
         }
     },
 
+    // 종목 삭제 (관련된 점수, 참가자 데이터 삭제 포함)
     deleteCategory: async (compId, categoryId) => {
         console.log(`[Store] deleteCategory START: comp=${compId}, cat=${categoryId}`);
         const { currentUser } = get();
@@ -573,6 +597,7 @@ const useStore = create((set, get) => ({
         }
     },
 
+    // 종목 순서 일괄 업데이트
     updateCategoriesOrder: async (compId, newCategories) => {
         const compRef = doc(db, 'competitions', compId);
         // Ensure to save normalized categories with correct order indexes
@@ -585,6 +610,7 @@ const useStore = create((set, get) => ({
 
 
 
+    // 종목 잠금/해제 개별 토글
     toggleCategoryLock: async (compId, categoryId, isLocked) => {
         const compRef = doc(db, 'competitions', compId);
         const compSnap = await getDoc(compRef);
@@ -596,21 +622,25 @@ const useStore = create((set, get) => ({
         }
     },
 
-    // Judge Actions
+    // 심사위원 관련 액션
+    // 심사위원 추가
     addJudge: async (compId, email, name) => {
         const lowerEmail = email.toLowerCase();
         await setDoc(doc(db, 'judges', `${compId}_${lowerEmail}`), { compId, email: lowerEmail, name });
     },
 
+    // 심사위원 삭제
     removeJudge: async (compId, email) => {
         await deleteDoc(doc(db, 'judges', `${compId}_${email.toLowerCase()}`));
     },
 
+    // 심사위원 이름 수정
     updateJudgeName: async (compId, email, newName) => {
         const lowerEmail = email.toLowerCase();
         await updateDoc(doc(db, 'judges', `${compId}_${lowerEmail}`), { name: newName });
     },
 
+    // 심사위원 익명화 (점수 보존을 위해 삭제 대신 이름만 변경)
     anonymizeJudge: async (compId, email) => {
         const lowerEmail = email.toLowerCase();
         const judgeRef = doc(db, 'judges', `${compId}_${lowerEmail}`);
@@ -618,17 +648,20 @@ const useStore = create((set, get) => ({
         await setDoc(judgeRef, { name: '알수 없음' }, { merge: true });
     },
 
-    // Admin Management Actions
+    // 관리자(Admin) 관리 액션
+    // 관리자 추가
     addAdmin: async (email, name) => {
         const lowerEmail = email.toLowerCase();
         await setDoc(doc(db, 'admins', lowerEmail), { email: lowerEmail, name });
     },
 
+    // 관리자 삭제
     removeAdmin: async (email) => {
         await deleteDoc(doc(db, 'admins', email.toLowerCase()));
     },
 
-    // Participant Actions
+    // 참가자 관련 액션
+    // 참가자 추가
     addParticipant: async (categoryId, number, name) => {
         const id = Math.random().toString(36).substr(2, 9);
         const { competitions } = get();
@@ -660,6 +693,7 @@ const useStore = create((set, get) => ({
         });
     },
 
+    // 특정 대회의 모든 참가자 가져오기
     getParticipantsByComp: (compId) => {
         const { participants } = get();
         const allByComp = [];
@@ -671,7 +705,8 @@ const useStore = create((set, get) => ({
         return allByComp;
     },
 
-    // Data Management Actions
+    // 데이터 관리 액션 (Import/Export)
+    // 전체 데이터 내보내기 (JSON 다운로드)
     exportData: async () => {
         set({ isExporting: true });
         try {
@@ -777,6 +812,7 @@ const useStore = create((set, get) => ({
         }
     },
 
+    // 데이터 가져오기 (JSON 파일)
     importData: async (jsonData, mode = 'merge') => {
         try {
             const data = typeof jsonData === 'string' ? JSON.parse(jsonData) : jsonData;

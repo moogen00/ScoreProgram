@@ -24,43 +24,43 @@ const AdminPanel = () => {
         isResetting, resetStatus, isExporting
     } = useStore();
 
-    // Form states
+    // 폼 입력 상태 (새로운 데이터 추가용)
     const [newItemLabel, setNewItemLabel] = useState('');
     const [newJudgeEmail, setNewJudgeEmail] = useState('');
     const [newJudgeName, setNewJudgeName] = useState('');
     const [newPNumber, setNewPNumber] = useState('');
     const [newPName, setNewPName] = useState('');
 
-    // Judge Editing State
+    // 심사위원 수정 상태
     const [editingJudgeEmail, setEditingJudgeEmail] = useState(null);
     const [tempJudgeName, setTempJudgeName] = useState('');
 
-    // Management Selection states
+    // 관리 대상 선택 상태 (대회 및 종목)
     const [manageCompId, setManageCompId] = useState('');
     const [manageCatId, setManageCatId] = useState('');
 
-    // Hierarchy Management states
+    // 계층 구조 관리 상태 (수정 모드)
     const [editingCatId, setEditingCatId] = useState(null);
     const [editValue, setEditValue] = useState('');
 
-    // Participant Edit states
+    // 참가자 정보 수정 상태
     const [editingPId, setEditingPId] = useState(null);
     const [editPNumber, setEditPNumber] = useState('');
     const [editPName, setEditPName] = useState('');
 
-    // Participant Batch & Sort states
+    // 참가자 일괄 관리 상태 (정렬, 복구 등)
     const [sortConfig, setSortConfig] = useState({ field: 'no', direction: 'asc' });
     const [recoveryTargetCatId, setRecoveryTargetCatId] = useState('');
 
-    // Import states
+    // 데이터 가져오기(Import) 상태
     const [importMode, setImportMode] = useState('merge'); // 'merge' or 'replace'
     const [isImporting, setIsImporting] = useState(false);
 
-    // QR Modal state
+    // QR 코드 모달 상태
     const [showQrModal, setShowQrModal] = useState(false);
     const PRODUCTION_URL = "https://scoreprogram-f8fbb.web.app";
 
-    // Find info for current category
+    // 현재 선택된 종목 정보 조회 함수
     const findCatInfo = () => {
         for (const comp of competitions) {
             const cat = (comp.categories || []).find(c => c.id === selectedCategoryId);
@@ -70,6 +70,7 @@ const AdminPanel = () => {
     };
     const { compName, catName } = findCatInfo();
 
+    // 채점 항목 추가 핸들러
     const handleAddScoring = (e) => {
         e.preventDefault();
         if (newItemLabel.trim()) {
@@ -78,6 +79,7 @@ const AdminPanel = () => {
         }
     };
 
+    // 심사위원 추가 핸들러
     const handleAddJudge = (e) => {
         e.preventDefault();
         if (manageCompId && newJudgeEmail.trim() && newJudgeName.trim()) {
@@ -87,6 +89,7 @@ const AdminPanel = () => {
         }
     };
 
+    // 심사위원 삭제 핸들러 (점수 존재 시 익명화 처리)
     const handleDeleteJudge = (compId, email, name) => {
         // Check if judge has scores in this competition
         let hasScores = false;
@@ -123,6 +126,7 @@ const AdminPanel = () => {
         }
     };
 
+    // 참가자 추가 핸들러 (중복 번호 체크 포함)
     const handleAddParticipant = (e) => {
         e.preventDefault();
         const number = newPNumber.trim();
@@ -141,6 +145,7 @@ const AdminPanel = () => {
         }
     };
 
+    // 심사위원 이름 수정 핸들러
     const handleUpdateJudgeName = (compId, email) => {
         if (tempJudgeName.trim()) {
             updateJudgeName(compId, email, tempJudgeName.trim());
@@ -148,6 +153,7 @@ const AdminPanel = () => {
         }
     };
 
+    // 참가자 정보 수정 검증 및 업데이트
     const validateAndUpdateParticipant = (categoryId, pId, newNumber, newName) => {
         const number = newNumber.trim();
         const name = newName.trim();
@@ -168,6 +174,7 @@ const AdminPanel = () => {
         setEditingPId(null);
     };
 
+    // 리스트 순서 변경 핸들러
     const move = (index, direction) => {
         const newItems = [...scoringItems];
         const targetIndex = index + direction;
@@ -176,6 +183,7 @@ const AdminPanel = () => {
         updateScoringItemOrder(newItems.map((item, i) => ({ ...item, order: i })));
     };
 
+    // 채점 항목 삭제 핸들러 (점수 존재 여부 체크)
     const handleDeleteScoringItem = (itemId) => {
         // Check if this item is used in any scores
         let hasScores = false;
@@ -211,6 +219,7 @@ const AdminPanel = () => {
         removeScoringItem(itemId);
     };
 
+    // 참가자 삭제 핸들러 (점수 존재 여부 체크)
     const handleDeleteParticipant = (categoryId, pId) => {
         // Check if participant has scores
         const participantScores = scores[categoryId]?.[pId];
@@ -229,6 +238,7 @@ const AdminPanel = () => {
         removeParticipant(categoryId, pId);
     };
 
+    // 참가자별 점수 합계 및 평균 계산 (랭킹 산정용)
     const getScoredParticipants = useCallback((ps, catScores) => {
         if (!ps || ps.length === 0) return [];
 
@@ -262,12 +272,14 @@ const AdminPanel = () => {
         }));
     }, []);
 
+    // 현재 관리 중인 종목의 참가자 랭킹 목록 계산
     const rankedCategoryParticipants = useMemo(() => {
         const ps = participants[manageCatId] || [];
         const catScores = scores[manageCatId] || {};
         return getScoredParticipants(ps, catScores);
     }, [participants, scores, manageCatId, getScoredParticipants]);
 
+    // 대회별 전체 참가자 목록 점수 및 랭킹 계산 (전체 현황용)
     const getCompParticipants = useCallback(() => {
         if (!manageCompId) return [];
         const comp = competitions.find(y => y.id === manageCompId);
@@ -317,6 +329,7 @@ const AdminPanel = () => {
         }));
     };
 
+    // 고아 참가자(종목이 삭제된 참가자) 탐색 및 복구 로직
     const getOrphanParticipants = () => {
         const allCatIds = new Set(competitions.flatMap(y => (y.categories || []).map(c => c.id)));
         const orphaned = [];

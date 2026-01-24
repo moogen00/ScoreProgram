@@ -15,15 +15,17 @@ const Leaderboard = () => {
 
     const isAdmin = currentUser?.role === 'ADMIN' || currentUser?.role === 'ROOT_ADMIN';
 
+    // 현재 카테고리의 참기자 및 점수 데이터 로드
     const categoryParticipants = participants[selectedCategoryId] || [];
     const categoryScores = scores[selectedCategoryId] || {};
 
-    // Map judges to J1, J2...
+    // 채점된 심사위원 목록 추출 (J1, J2 등으로 매핑하기 위함)
     const scoredJudges = new Set();
     Object.values(categoryScores).forEach(pScores => {
         Object.keys(pScores).forEach(jEmail => scoredJudges.add(jEmail));
     });
 
+    // 심사위원 이메일 정렬 후 J1, J2 ... 매핑
     const judgeMap = {};
     Array.from(scoredJudges).sort().forEach((email, idx) => {
         judgeMap[email] = `J${idx + 1}`;
@@ -31,7 +33,7 @@ const Leaderboard = () => {
 
     const sortedJudges = Object.entries(judgeMap).sort((a, b) => a[1].localeCompare(b[1]));
 
-    // Calculate rankings
+    // 리더보드 데이터 계산 (참가자별 총점, 평균, 순위)
     const leaderboardData = useMemo(() => {
         const scored = categoryParticipants.map(p => {
             const pScores = categoryScores[p.id] || {};
@@ -40,6 +42,7 @@ const Leaderboard = () => {
             const judgeEmails = Object.keys(pScores);
             const judgeCount = judgeEmails.length;
 
+            // 참가자의 심사위원별 점수 합산
             judgeEmails.forEach(jEmail => {
                 const itemScores = pScores[jEmail] || {};
                 const jTotal = Object.values(itemScores).reduce((a, b) => a + b, 0);
@@ -47,11 +50,12 @@ const Leaderboard = () => {
                 totalSum += jTotal;
             });
 
+            // 평균 계산
             const average = judgeCount > 0 ? totalSum / judgeCount : 0;
             return { ...p, totalSum, average, judgeCount, judgeBreakdown, pScores };
-        }).sort((a, b) => b.average - a.average);
+        }).sort((a, b) => b.average - a.average); // 평균 점수 내림차순 정렬
 
-        // Standard Competition Ranking O(N log N)
+        // 순위 계산 (동점자 처리 로직 포함)
         const rankMap = new Map();
         let currentRank = 1;
         scored.forEach((d, idx) => {
