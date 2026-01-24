@@ -290,7 +290,7 @@ const Sidebar = ({ width, isOpen, onClose, onRequestLogout }) => {
                             </div>
                         )}
                         <div className="flex items-center justify-between group">
-                            <p className="text-[10px] text-slate-400 uppercase tracking-widest font-black truncate">
+                            <p className="text-[10px] text-slate-400 uppercase tracking-widest font-black">
                                 {competitionName}
                             </p>
                             {(!isEditingComp && (userRole === 'ADMIN' || userRole === 'ROOT_ADMIN')) && (

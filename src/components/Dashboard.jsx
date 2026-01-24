@@ -48,7 +48,7 @@ const Dashboard = () => {
                         <select
                             value={selectedCompId}
                             onChange={(e) => setSelectedCompId(e.target.value)}
-                            className="w-full md:w-48 bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white outline-none focus:ring-2 focus:ring-indigo-500/50 font-bold"
+                            className="w-full md:w-auto md:min-w-[12rem] bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white outline-none focus:ring-2 focus:ring-indigo-500/50 font-bold"
                         >
                             {competitions.map(y => (
                                 <option key={y.id} value={y.id}>{y.name}</option>

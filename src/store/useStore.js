@@ -606,6 +606,11 @@ const useStore = create((set, get) => ({
         await deleteDoc(doc(db, 'judges', `${compId}_${email.toLowerCase()}`));
     },
 
+    updateJudgeName: async (compId, email, newName) => {
+        const lowerEmail = email.toLowerCase();
+        await updateDoc(doc(db, 'judges', `${compId}_${lowerEmail}`), { name: newName });
+    },
+
     anonymizeJudge: async (compId, email) => {
         const lowerEmail = email.toLowerCase();
         const judgeRef = doc(db, 'judges', `${compId}_${lowerEmail}`);

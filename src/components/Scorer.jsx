@@ -144,7 +144,7 @@ const Scorer = () => {
                 const judgeTotal = Object.values(vals).reduce((s, v) => s + (parseFloat(v) || 0), 0);
                 sumOfTotals += judgeTotal;
             });
-            return parseFloat((sumOfTotals / judgeEmails.length).toFixed(1));
+            return parseFloat((sumOfTotals / judgeEmails.length).toFixed(2));
         } else {
             // Judge: Use local/own total
             return parseFloat(calculateTotal(pId));
@@ -187,7 +187,7 @@ const Scorer = () => {
     // Helper for Spectator Item View
     const getAverageItemScore = useCallback((pId, itemId) => {
         const stats = getAdminItemStats(pId, itemId);
-        return stats.avg > 0 ? stats.avg.toFixed(1) : '-';
+        return stats.avg > 0 ? stats.avg.toFixed(2) : '-';
     }, [getAdminItemStats]);
 
     // Sort scoring items
@@ -438,7 +438,7 @@ const Scorer = () => {
                                         [...rankedParticipants]
                                             .sort((a, b) => parseInt(a.number || 0, 10) - parseInt(b.number || 0, 10))
                                             .map((p) => {
-                                                const displayTotal = getParticipantTotal(p.id).toFixed(1);
+                                                const displayTotal = getParticipantTotal(p.id).toFixed(2);
 
                                                 return (
                                                     <tr key={p.id} className="hover:bg-white/[0.02] transition-colors group">
@@ -548,7 +548,7 @@ const Scorer = () => {
                                 [...rankedParticipants]
                                     .sort((a, b) => parseInt(a.number || 0, 10) - parseInt(b.number || 0, 10))
                                     .map((p) => {
-                                        const displayTotal = getParticipantTotal(p.id).toFixed(1);
+                                        const displayTotal = getParticipantTotal(p.id).toFixed(2);
 
                                         return (
                                             <div key={p.id} className="bg-slate-800/50 rounded-xl border border-white/10 overflow-hidden shadow-lg">

@@ -138,7 +138,7 @@ const Leaderboard = () => {
                                             <div className="flex items-center justify-end gap-3">
                                                 <div className="flex flex-col items-end">
                                                     <span className="text-3xl font-black text-white tabular-nums">
-                                                        {data.average.toFixed(1)}
+                                                        {data.average.toFixed(2)}
                                                     </span>
                                                     <span className="text-[10px] text-slate-500 font-mono">Sum: {data.totalSum.toFixed(1)}</span>
                                                 </div>
