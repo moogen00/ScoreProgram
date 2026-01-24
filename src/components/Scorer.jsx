@@ -83,14 +83,16 @@ const Scorer = () => {
             return;
         }
 
+        // Regex to allow only numbers and at most 1 decimal place
+        if (!/^\d*\.?\d{0,1}$/.test(val)) return;
+
         let num = parseFloat(val);
         if (isNaN(num)) return;
         if (num > 9.9) num = 9.9;
-        // if (num < 0) num = 0; // Removed min clamp during typing to allow 5.x entry
 
         setLocalScores(prev => ({
             ...prev,
-            [participantId]: { ...prev[participantId], [itemId]: num }
+            [participantId]: { ...prev[participantId], [itemId]: val }
         }));
     };
 
@@ -683,7 +685,7 @@ const Scorer = () => {
                                         return compJudges.map((j, jIdx) => {
                                             const vals = pScoresByJudge[j.email] || {};
                                             const judgeTotal = Object.keys(vals).length > 0
-                                                ? Object.values(vals).reduce((s, v) => s + (parseFloat(v) || 0), 0).toFixed(1)
+                                                ? Object.values(vals).reduce((s, v) => s + (parseFloat(v) || 0), 0).toFixed(2)
                                                 : '-';
 
                                             return (
