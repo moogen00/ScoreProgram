@@ -837,6 +837,16 @@ const useStore = create((set, get) => ({
                 batch.set(doc(db, 'competitions', comp.id), cleanedComp);
             });
 
+            // 2.1 Import Settings (General & Scoring)
+            if (data.settings) {
+                if (data.settings.general) {
+                    batch.set(doc(db, 'settings', 'general'), data.settings.general);
+                }
+                if (data.settings.scoring) {
+                    batch.set(doc(db, 'settings', 'scoring'), data.settings.scoring);
+                }
+            }
+
             // 3. Import Participants
             if (data.participants) {
                 const pList = Array.isArray(data.participants)
