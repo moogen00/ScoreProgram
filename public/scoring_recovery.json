@@ -1,0 +1,23 @@
+{
+    "settings": {
+        "scoring": {
+            "items": [
+                {
+                    "label": "베이직 턴 기술부분",
+                    "order": 0,
+                    "id": "be74pclk3"
+                },
+                {
+                    "order": 1,
+                    "label": "음악 타이밍등 뮤지컬리티",
+                    "id": "6jx206bzv"
+                },
+                {
+                    "id": "3le3zdxo9",
+                    "order": 2,
+                    "label": "안무 표현등의 예술부문"
+                }
+            ]
+        }
+    }
+}

@@ -1,0 +1,109 @@
+{
+    "version": "1.5",
+    "timestamp": "2026-01-25T13:00:00.000Z",
+    "admins": [
+        {
+            "email": "moogen00@gmail.com",
+            "name": "Root Admin",
+            "createdAt": "2026-01-25T13:00:00.000Z"
+        }
+    ],
+    "settings": {
+        "general": {
+            "competitionName": "2026 Sample Competition"
+        },
+        "scoring": {
+            "items": [
+                {
+                    "id": "item_tech",
+                    "label": "기술 점수 (Technique)",
+                    "order": 0
+                },
+                {
+                    "id": "item_art",
+                    "label": "예술 점수 (Artistry)",
+                    "order": 1
+                },
+                {
+                    "id": "item_musicality",
+                    "label": "음악성 (Musicality)",
+                    "order": 2
+                }
+            ]
+        }
+    },
+    "competitions": [
+        {
+            "id": "comp_sample_2026",
+            "name": "2026 서울 댄스 챔피언십",
+            "locked": false,
+            "createdAt": "2026-01-25T13:00:00.000Z",
+            "categories": [
+                {
+                    "id": "cat_salsa_pro",
+                    "name": "Salsa Professional",
+                    "genre": "Salsa",
+                    "category": "Professional",
+                    "order": 0,
+                    "locked": false
+                },
+                {
+                    "id": "cat_bachata_am",
+                    "name": "Bachata Amateur",
+                    "genre": "Bachata",
+                    "category": "Amateur",
+                    "order": 1,
+                    "locked": false
+                }
+            ]
+        }
+    ],
+    "participants": {
+        "cat_salsa_pro": [
+            {
+                "id": "p1",
+                "name": "김철수",
+                "number": "A1",
+                "categoryId": "cat_salsa_pro",
+                "competition": "2026 서울 댄스 챔피언십",
+                "genre": "Salsa",
+                "category": "Professional"
+            },
+            {
+                "id": "p2",
+                "name": "이영희",
+                "number": "A2",
+                "categoryId": "cat_salsa_pro",
+                "competition": "2026 서울 댄스 챔피언십",
+                "genre": "Salsa",
+                "category": "Professional"
+            }
+        ],
+        "cat_bachata_am": [
+            {
+                "id": "p3",
+                "name": "박지성",
+                "number": "B1",
+                "categoryId": "cat_bachata_am",
+                "competition": "2026 서울 댄스 챔피언십",
+                "genre": "Bachata",
+                "category": "Amateur"
+            }
+        ]
+    },
+    "judgesByComp": {
+        "comp_sample_2026": [
+            {
+                "email": "judge1@test.com",
+                "name": "심사위원 1",
+                "compId": "comp_sample_2026"
+            },
+            {
+                "email": "judge2@test.com",
+                "name": "심사위원 2",
+                "compId": "comp_sample_2026"
+            }
+        ]
+    },
+    "scores": {}
+}
