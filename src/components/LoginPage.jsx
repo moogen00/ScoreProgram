@@ -1,7 +1,8 @@
 import React, { useState } from 'react';
 import { GoogleLogin } from '@react-oauth/google';
 import { jwtDecode } from 'jwt-decode';
-import { signInAnonymously } from 'firebase/auth';
+import { signInAnonymously, GoogleAuthProvider, signInWithCredential } from 'firebase/auth';
+
 import useStore from '../store/useStore';
 import { auth } from '../lib/firebase';
 import { Trophy, LogIn, Users } from 'lucide-react';
@@ -11,28 +12,36 @@ const LoginPage = () => {
     const { login, admins, judgesByComp } = useStore();
     const [email, setEmail] = useState('');
 
-    const handleSuccess = (credentialResponse) => {
-        const decoded = jwtDecode(credentialResponse.credential);
-        const email = decoded.email;
+    const handleSuccess = async (credentialResponse) => {
+        try {
+            const decoded = jwtDecode(credentialResponse.credential);
+            const email = decoded.email;
 
-        // Check permissions
-        const rootAdmins = (import.meta.env.VITE_ROOT_ADMIN_EMAILS || '').split(',').map(e => e.trim());
-        const isRootAdmin = rootAdmins.includes(email);
-        const isAdmin = isRootAdmin || Object.values(admins || {}).some(a => a.email === email);
-        const isJudge = Object.values(judgesByComp || {}).some(compJudges => compJudges.some(j => j.email === email));
+            // Check permissions
+            const rootAdmins = (import.meta.env.VITE_ROOT_ADMIN_EMAILS || '').split(',').map(e => e.trim());
+            const isRootAdmin = rootAdmins.includes(email);
+            const isAdmin = isRootAdmin || Object.values(admins || {}).some(a => a.email === email);
+            const isJudge = Object.values(judgesByComp || {}).some(compJudges => compJudges.some(j => j.email === email));
 
-        // Strict Check: Enforce strictly in Production, allow loose access in Dev
-        // Strict Check: Enforce strictly in Production, allow loose access in Dev
-        if (import.meta.env.PROD && !isAdmin && !isJudge) {
-            alert('권한이 없는 계정입니다. (Unauthorized Account)\n\n관리자나 심사위원으로 등록된 계정만 로그인할 수 있습니다.');
-            return; // STOP EXECUTION: Do not proceed to login
+            // Strict Check: Enforce strictly in Production, allow loose access in Dev
+            if (import.meta.env.PROD && !isAdmin && !isJudge) {
+                alert('권한이 없는 계정입니다. (Unauthorized Account)\n\n관리자나 심사위원으로 등록된 계정만 로그인할 수 있습니다.');
+                return;
+            }
+
+            // Firebase Authentication Bridge
+            const credential = GoogleAuthProvider.credential(credentialResponse.credential);
+            await signInWithCredential(auth, credential);
+
+            login({
+                email: decoded.email,
+                name: decoded.name,
+                picture: decoded.picture
+            });
+        } catch (error) {
+            console.error("Firebase Login Error:", error);
+            alert("로그인 처리 중 오류가 발생했습니다: " + error.message);
         }
-
-        login({
-            email: decoded.email,
-            name: decoded.name,
-            picture: decoded.picture
-        });
     };
 
     const handleError = () => {

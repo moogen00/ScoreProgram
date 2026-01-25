@@ -725,6 +725,36 @@ const AdminPanel = () => {
                                 <div className="p-6 bg-emerald-500/5 border border-emerald-500/20 rounded-2xl">
                                     <FileUp className="text-emerald-400 mb-4" size={32} />
                                     <h3 className="text-lg font-bold text-white mb-2">DB 데이터 가져오기</h3>
+                                    {/* Permission Tester */}
+                                    <div className="mb-4">
+                                        <button
+                                            onClick={async () => {
+                                                const { doc, setDoc, deleteDoc } = await import('firebase/firestore');
+                                                const { db, auth } = await import('../lib/firebase'); // Import auth
+                                                const user = auth.currentUser;
+
+                                                const collections = ['competitions', 'participants', 'judges', 'settings', 'admins'];
+                                                let results = [`🔍 진단 정보:`, `Email: '${user?.email}'`, `UID: ${user?.uid}`, `---`];
+
+                                                alert(`권한 테스트를 시작합니다...\n(사용자: ${user?.email})`);
+
+                                                for (const col of collections) {
+                                                    try {
+                                                        const testRef = doc(db, col, 'permission_test_doc');
+                                                        await setDoc(testRef, { test: true, author: user?.email });
+                                                        await deleteDoc(testRef);
+                                                        results.push(`✅ ${col}: 성공`);
+                                                    } catch (e) {
+                                                        results.push(`❌ ${col}: 실패 (${e.code})`);
+                                                    }
+                                                }
+                                                alert(results.join('\n'));
+                                            }}
+                                            className="px-3 py-1 bg-yellow-600 hover:bg-yellow-500 text-white rounded text-xs font-bold transition-colors"
+                                        >
+                                            🛠 쓰기 권한 테스트 실행
+                                        </button>
+                                    </div>
                                     <div className="flex gap-4 mb-4">
                                         <label className="flex-1 flex items-center gap-2 cursor-pointer">
                                             <input
