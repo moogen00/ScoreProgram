@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useMemo } from 'react';
+import React, { useState, useCallback, useMemo, useEffect } from 'react';
 import { Plus, Trash2, ArrowUp, ArrowDown, Settings, List, Shield, Trophy, Layout, Users, UserPlus, Hash, User as UserIcon, SortAsc, Lock, Unlock, PenTool, FileUp, FileDown, Database, AlertTriangle, Check, LogOut, QrCode, X, RefreshCcw, Edit2 } from 'lucide-react';
 import QRCode from "react-qr-code";
 import useStore from '../store/useStore';
@@ -19,7 +19,7 @@ const AdminPanel = () => {
         admins, addAdmin, removeAdmin, competitionName, setCompetitionName,
         seedRandomScores, clearCompetitionScores,
         exportData, importData, clearAllData, normalizeDatabase, fixLockedProperties,
-        currentUser,
+        currentUser, syncCompetitionData,
         adminTab, setAdminTab,
         isResetting, resetStatus, isExporting
     } = useStore();
@@ -59,6 +59,13 @@ const AdminPanel = () => {
     // QR 코드 모달 상태
     const [showQrModal, setShowQrModal] = useState(false);
     const PRODUCTION_URL = "https://scoreprogram-f8fbb.web.app";
+
+    // 컴포넌트 마운트 또는 대회 변경 시 데이터 동기화
+    useEffect(() => {
+        if (manageCompId) {
+            syncCompetitionData(manageCompId);
+        }
+    }, [manageCompId, syncCompetitionData]);
 
     // 현재 선택된 종목 정보 조회 함수
     const findCatInfo = () => {

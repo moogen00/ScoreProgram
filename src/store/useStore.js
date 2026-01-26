@@ -56,6 +56,8 @@ const useStore = create((set, get) => ({
 
         // Force refresh scores to ensure we get data if rules were restrictive before login
         get().refreshScores();
+        // Start syncing user permissions
+        get().syncUserSpecificData();
     },
     // 로그아웃 처리
     logout: () => {
@@ -85,8 +87,18 @@ const useStore = create((set, get) => ({
     // 2. 일반 Admin 확인
     // 3. 심사위원(Judge) 확인 및 배정된 대회 목록 갱신
     syncUserRole: () => {
-        const { currentUser, judgesByComp, admins } = get();
+        const { currentUser, judgesByComp, admins, competitions } = get();
         if (!currentUser) return;
+
+        // Dev Mode Mock Judge
+        if (import.meta.env.DEV && currentUser.email === 'judge@example.com') {
+            const mockRole = 'JUDGE';
+            const mockAssigned = competitions.map(c => c.id);
+            if (currentUser.role !== mockRole || (currentUser.assignedCompetitions || []).length !== mockAssigned.length) {
+                set({ currentUser: { ...currentUser, role: mockRole, assignedCompetitions: mockAssigned, name: 'Mock Judge' } });
+            }
+            return;
+        }
 
         // If explicitly Spectator
         if (currentUser.email === 'guest@score.com') {
@@ -140,7 +152,9 @@ const useStore = create((set, get) => ({
                 // This prevents infinite loops of sync -> update -> sync -> update
                 const lastLogin = found.lastLoginAt ? new Date(found.lastLoginAt).getTime() : 0;
                 if (Date.now() - lastLogin > 3600000) { // 3600000 ms = 1 hour
-                    setDoc(doc(db, 'judges', `${yId}_${currentUser.email}`), {
+                    // Standardize ID: use underscores instead of dots in email
+                    const safeEmail = currentUser.email.replace(/\./g, '_');
+                    setDoc(doc(db, 'judges', `${yId}_${safeEmail}`), {
                         lastLoginAt: new Date().toISOString()
                     }, { merge: true });
                 }
@@ -306,8 +320,12 @@ const useStore = create((set, get) => ({
 
         // 1. Update Scores
         // scoresMap is { [participantId]: { [itemId]: value } }
+        const currentParticipants = get().participants[categoryId] || [];
         let opCount = 0;
         for (const [pId, values] of Object.entries(scoresMap)) {
+            const pObj = currentParticipants.find(p => p.id === pId);
+            const pName = pObj ? pObj.name : '';
+
             const docId = `${categoryId}_${pId}_${email}`;
             const scoreRef = doc(db, 'scores', docId);
 
@@ -316,7 +334,9 @@ const useStore = create((set, get) => ({
                 genre: genre,
                 category: category,
                 categoryId,
+                categoryId,
                 participantId: pId,
+                participantName: pName,
                 judgeEmail: email,
                 values: values,
                 updatedAt: new Date().toISOString()
@@ -325,13 +345,36 @@ const useStore = create((set, get) => ({
         }
 
         // 2. Mark as Submitted in Judge's record
-        const judgeRef = doc(db, 'judges', `${compId}_${email}`);
+        const safeEmail = email.replace(/\./g, '_');
+        const judgeRef = doc(db, 'judges', `${compId}_${safeEmail}`);
         batch.set(judgeRef, {
             submittedCategories: {
                 [categoryId]: true
             }
         }, { merge: true });
         opCount++;
+
+        // Optimistic Update for UI responsiveness
+        const { judgesByComp } = get();
+        const currentJudges = judgesByComp[compId] || [];
+        const updatedJudges = currentJudges.map(j => {
+            if (j.email === email) {
+                return {
+                    ...j,
+                    submittedCategories: {
+                        ...(j.submittedCategories || {}),
+                        [categoryId]: true
+                    }
+                };
+            }
+            return j;
+        });
+        set(state => ({
+            judgesByComp: {
+                ...state.judgesByComp,
+                [compId]: updatedJudges
+            }
+        }));
 
         console.log(`[Store] Committing batch for ${opCount} operations...`);
         await batch.commit();
@@ -357,7 +400,8 @@ const useStore = create((set, get) => ({
 
         console.log(`[Store] toggleJudgeSubmission START: ${categoryId} -> ${isSubmitted}`);
         const email = currentUser.email.toLowerCase().trim();
-        const judgeRef = doc(db, 'judges', `${compId}_${email}`);
+        const safeEmail = email.replace(/\./g, '_');
+        const judgeRef = doc(db, 'judges', `${compId}_${safeEmail}`);
 
         // Use batch for consistency with submitCategoryScores
         const batch = writeBatch(db);
@@ -366,6 +410,28 @@ const useStore = create((set, get) => ({
                 [categoryId]: isSubmitted
             }
         }, { merge: true });
+
+        // Optimistic Update for UI responsiveness
+        const { judgesByComp: currentJudgesByComp } = get();
+        const currentJudgesList = currentJudgesByComp[compId] || [];
+        const updatedJudgesList = currentJudgesList.map(j => {
+            if (j.email === email) {
+                return {
+                    ...j,
+                    submittedCategories: {
+                        ...(j.submittedCategories || {}),
+                        [categoryId]: isSubmitted
+                    }
+                };
+            }
+            return j;
+        });
+        set(state => ({
+            judgesByComp: {
+                ...state.judgesByComp,
+                [compId]: updatedJudgesList
+            }
+        }));
 
         await batch.commit();
         console.log(`[Store] toggleJudgeSubmission SUCCESS: ${categoryId} -> ${isSubmitted}`);
@@ -657,24 +723,26 @@ const useStore = create((set, get) => ({
     // 심사위원 추가
     addJudge: async (compId, email, name) => {
         const lowerEmail = email.toLowerCase();
-        await setDoc(doc(db, 'judges', `${compId}_${lowerEmail}`), { compId, email: lowerEmail, name });
+        const safeEmail = lowerEmail.replace(/\./g, '_');
+        await setDoc(doc(db, 'judges', `${compId}_${safeEmail}`), { compId, email: lowerEmail, name });
     },
 
     // 심사위원 삭제
     removeJudge: async (compId, email) => {
-        await deleteDoc(doc(db, 'judges', `${compId}_${email.toLowerCase()}`));
+        const safeEmail = email.toLowerCase().replace(/\./g, '_');
+        await deleteDoc(doc(db, 'judges', `${compId}_${safeEmail}`));
     },
 
     // 심사위원 이름 수정
     updateJudgeName: async (compId, email, newName) => {
-        const lowerEmail = email.toLowerCase();
-        await updateDoc(doc(db, 'judges', `${compId}_${lowerEmail}`), { name: newName });
+        const safeEmail = email.toLowerCase().replace(/\./g, '_');
+        await updateDoc(doc(db, 'judges', `${compId}_${safeEmail}`), { name: newName });
     },
 
     // 심사위원 익명화 (점수 보존을 위해 삭제 대신 이름만 변경)
     anonymizeJudge: async (compId, email) => {
-        const lowerEmail = email.toLowerCase();
-        const judgeRef = doc(db, 'judges', `${compId}_${lowerEmail}`);
+        const safeEmail = email.toLowerCase().replace(/\./g, '_');
+        const judgeRef = doc(db, 'judges', `${compId}_${safeEmail}`);
         // Only update the name, keep everything else (email, compId, submitted status)
         await setDoc(judgeRef, { name: '알수 없음' }, { merge: true });
     },
@@ -850,12 +918,34 @@ const useStore = create((set, get) => ({
             const batch = writeBatch(db);
 
             // 1. Clear existing data if mode is 'replace'
+            // 1. Clear existing data if mode is 'replace'
             if (mode === 'replace') {
-                const collections = ['competitions', 'years', 'participants', 'judges', 'scores', 'admins'];
+                const collections = ['competitions', 'years', 'participants', 'judges', 'scores'];
+                // Clean standard collections
                 for (const collName of collections) {
                     const snap = await getDocs(collection(db, collName));
-                    snap.docs.forEach(doc => batch.delete(doc.ref));
+                    const deletePromises = snap.docs.map(doc => deleteDoc(doc.ref));
+                    await Promise.all(deletePromises);
                 }
+
+                // Special handling for 'admins': Preserve ROOT_ADMIN
+                const adminSnap = await getDocs(collection(db, 'admins'));
+                const { currentUser } = get();
+                const rootEmail = 'baramnomad@gmail.com'; // Hardcoded backup or env
+                const currentEmail = currentUser?.email?.toLowerCase();
+
+                const adminDeletePromises = [];
+                adminSnap.docs.forEach(doc => {
+                    const adminEmail = doc.id.toLowerCase();
+                    // Prevent deleting the Root Admin (hardcoded) or the Current User (if they are doing the reset)
+                    // This prevents locking oneself out.
+                    if (adminEmail === rootEmail || (currentEmail && adminEmail === currentEmail)) {
+                        console.log(`[Store] Preserving Admin: ${adminEmail}`);
+                        return;
+                    }
+                    adminDeletePromises.push(deleteDoc(doc.ref));
+                });
+                await Promise.all(adminDeletePromises);
             }
 
             // 2. Import Competitions & Categories
@@ -1115,20 +1205,33 @@ const useStore = create((set, get) => ({
 
             // Also ensure these judges are registered for the competition in the DB
             for (const judge of mockJudges) {
-                const judgeRef = doc(db, 'judges', `${compId}_${judge.email}`);
+                const safeEmail = judge.email.toLowerCase().replace(/\./g, '_');
+                const judgeRef = doc(db, 'judges', `${compId}_${safeEmail}`);
                 batch.set(judgeRef, { compId, email: judge.email, name: judge.name });
             }
 
             for (const p of catParticipants) {
                 for (const judge of mockJudges) {
-                    const docId = `${cat.id}_${p.id}_${judge.email}`;
+                    const safeEmail = judge.email.toLowerCase().replace(/\./g, '_');
+                    const docId = `${cat.id}_${p.id}_${safeEmail}`;
                     const scoreRef = doc(db, 'scores', docId);
                     const values = {};
                     scoringItems.forEach(item => {
-                        // Generate random score between 5.0 and 10.0 for realism
-                        values[item.id] = parseFloat((Math.random() * 5 + 5).toFixed(1));
+                        // Generate random score between 5.5 and 9.9 for realism (matching UI limits)
+                        values[item.id] = parseFloat((Math.random() * 4.4 + 5.5).toFixed(1));
                     });
-                    batch.set(scoreRef, { values });
+
+                    batch.set(scoreRef, {
+                        competition: comp.name,
+                        genre: cat.genre || 'General',
+                        category: cat.category || cat.name,
+                        categoryId: cat.id,
+                        participantId: p.id,
+                        participantName: p.name || '',
+                        judgeEmail: judge.email,
+                        values,
+                        updatedAt: new Date().toISOString()
+                    });
                 }
             }
         }
@@ -1181,10 +1284,20 @@ const useStore = create((set, get) => ({
             console.log(`[Sync] Triggering Competition-wide Judge sync for Admin: ${compId}`);
             const qJudges = query(collection(db, 'judges'), where('compId', '==', compId));
             unsubJ = onSnapshot(qJudges, (snapshot) => {
-                const list = snapshot.docs.map(doc => {
+                const list = [];
+                snapshot.docs.forEach(doc => {
                     const data = doc.data();
-                    return { ...data, email: (data.email || '').toLowerCase().trim() };
+                    const email = (data.email || '').toLowerCase().trim();
+                    const compId = data.compId || data.yearId;
+
+                    // Filter Ghost Records
+                    const safeEmail = email.replace(/\./g, '_');
+                    const expectedId = `${compId}_${safeEmail}`;
+                    if (doc.id !== expectedId) return;
+
+                    list.push({ ...data, email });
                 });
+
                 set(state => {
                     const newJudgesByComp = { ...state.judgesByComp, [compId]: list };
                     return { judgesByComp: newJudgesByComp };
@@ -1326,20 +1439,56 @@ const useStore = create((set, get) => ({
         });
 
         // 3. User-Specific Judge Sync (Minimal read, critical for judge sidebar visibility)
-        const user = get().currentUser;
-        if (user && user.email) {
-            const q = query(collection(db, 'judges'), where('email', '==', user.email.toLowerCase().trim()));
-            onSnapshot(q, (snapshot) => {
+        get().syncUserSpecificData();
+    },
+
+    // New Action: Sync User Specific Data (Judges)
+    syncUserSpecificData: () => {
+        const { currentUser, unsubJudges } = get();
+
+        // Clean up existing subscription if any
+        if (unsubJudges) {
+            unsubJudges();
+            set({ unsubJudges: null });
+        }
+
+        if (currentUser && currentUser.email) {
+            console.log(`[Store] Starting User-Specific Sync for ${currentUser.email}`);
+            const q = query(collection(db, 'judges'), where('email', '==', currentUser.email.toLowerCase().trim()));
+            const unsub = onSnapshot(q, (snapshot) => {
                 const grouped = {};
                 snapshot.docs.forEach(doc => {
                     const j = doc.data();
+
+                    // Filter out legacy records with dots in ID (Ghost records)
+                    // We only want the standardized record (underscores)
+                    // The expected ID format is `${compId}_${email.replace(/\./g, '_')}`
+                    // or `${compId}_${email}` if email has no dots? 
+                    // To be safe, if we have duplicate records (one matches ID with dots, one matches ID with underscores),
+                    // we prefer the one that matches the Underscore logic.
+                    // Actually, simpler check: if doc.id contains a dot in the email part, skip it if we have underscores?
+                    // Let's strictly enforce that we only use the doc if its ID matches the sanitization logic.
+
                     const compId = j.compId || j.yearId;
+                    const safeEmail = j.email.toLowerCase().trim().replace(/\./g, '_');
+                    const expectedId = `${compId}_${safeEmail}`;
+
+                    // If the document ID does NOT match the expected Underscore format, 
+                    // AND it's different from the one we expect (e.g. it has dots), we skip it.
+                    // This assumes the correct record IS the underscored one.
+                    if (doc.id !== expectedId) {
+                        console.warn(`[Store] Skipping legacy/mismatch judge record: ${doc.id} (Expected: ${expectedId})`);
+                        return;
+                    }
+
                     if (!grouped[compId]) grouped[compId] = [];
                     grouped[compId].push({ ...j, email: j.email.toLowerCase().trim() });
                 });
+                console.log(`[Store] User Judges Synced: found in ${Object.keys(grouped).length} competitions`);
                 set(state => ({ judgesByComp: { ...state.judgesByComp, ...grouped } }));
                 get().syncUserRole();
             });
+            set({ unsubJudges: unsub });
         }
     },
 
