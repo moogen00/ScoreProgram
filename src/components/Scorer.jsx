@@ -37,7 +37,8 @@ const Scorer = () => {
     const isJudgeForThisComp = judgesByComp[currentCompId]?.some(j => j.email === currentUser?.email);
 
     // 현재 사용자가 이미 제출했는지 확인
-    const myJudgeRecord = useMemo(() => judgesByComp[currentCompId]?.find(j => j.email === currentUser?.email), [judgesByComp, currentCompId, currentUser]);
+    const userEmail = currentUser?.email?.toLowerCase()?.trim() || '';
+    const myJudgeRecord = useMemo(() => judgesByComp[currentCompId]?.find(j => j.email === userEmail), [judgesByComp, currentCompId, userEmail]);
     const isSubmitted = myJudgeRecord?.submittedCategories?.[selectedCategoryId] || false;
 
     // Auth: Everyone can view, but only Admin/Assigned Judge can edit
@@ -53,12 +54,12 @@ const Scorer = () => {
     const isLocked = (isGlobalLocked || isSubmitted) && !isAdmin;
 
     console.log('[Scorer Debug]', {
-        email: currentUser?.email,
+        userEmail,
         role: currentUser?.role,
         isSpectator,
         isLocked,
-        isCompLocked,
-        isCategoryLocked,
+        isGlobalLocked,
+        isSubmitted,
         selectedCategoryId
     });
 
@@ -68,11 +69,11 @@ const Scorer = () => {
 
         const initialScores = {};
         categoryParticipants.forEach(p => {
-            const userScores = scores[selectedCategoryId]?.[p.id]?.[currentUser.email] || {};
+            const userScores = scores[selectedCategoryId]?.[p.id]?.[userEmail] || {};
             initialScores[p.id] = { ...userScores };
         });
         setLocalScores(initialScores);
-    }, [selectedCategoryId, currentUser, scores, categoryParticipants]);
+    }, [selectedCategoryId, currentUser, scores, categoryParticipants, userEmail]);
 
     // 점수 입력 핸들러 (실시간 입력 제한 및 로컬 상태 업데이트)
     const handleScoreChange = (participantId, itemId, val) => {
@@ -105,22 +106,30 @@ const Scorer = () => {
         if (isGlobalLocked && !isAdmin) return; // Cannot toggle if globally locked
 
         setIsSaving(true);
+        console.log(`[Scorer] handleToggleSubmit START: category=${selectedCategoryId}, isSubmitted=${isSubmitted}`);
 
         // Safety timeout to prevent infinite processing state
-        const safetyTimer = setTimeout(() => setIsSaving(false), 5000);
+        const safetyTimer = setTimeout(() => {
+            console.warn('[Scorer] handleToggleSubmit: Safety timer triggered (5s)');
+            setIsSaving(false);
+        }, 5000);
 
         try {
             if (isSubmitted) {
                 // Currently Submitted -> Unlock (Edit Mode)
+                console.log('[Scorer] Calling toggleJudgeSubmission -> false');
                 await toggleJudgeSubmission(selectedCategoryId, false);
             } else {
                 // Currently Editing -> Save & Submit
+                console.log('[Scorer] Calling submitCategoryScores');
                 await submitCategoryScores(selectedCategoryId, localScores);
             }
+            console.log('[Scorer] handleToggleSubmit SUCCESS');
         } catch (e) {
-            console.error("Toggle Submit failed", e);
-            alert("처리 중 오류가 발생했습니다.");
+            console.error("[Scorer] handleToggleSubmit FAILED", e);
+            alert(`처리 중 오류가 발생했습니다: ${e.message || e}`);
         } finally {
+            console.log('[Scorer] handleToggleSubmit FINALLY: resetting state');
             clearTimeout(safetyTimer);
             setIsSaving(false);
         }

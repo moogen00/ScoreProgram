@@ -60,7 +60,10 @@ function App() {
                     window.history.forward();
                 } else {
                     const { activeView, selectedCategoryId, adminTab } = event.state;
-                    useStore.setState({ activeView, selectedCategoryId, adminTab: adminTab || 'scoring' });
+                    const state = useStore.getState();
+                    state.setActiveView(activeView);
+                    state.setSelectedCategoryId(selectedCategoryId);
+                    useStore.setState({ adminTab: adminTab || 'scoring' });
 
                     // Only close the modal if we are NOT in the middle of trapping the back button
                     if (!isTrappingRef.current) {
@@ -113,15 +116,20 @@ function App() {
 
                 // Root Admin check from env
                 const rootAdmins = (import.meta.env.VITE_ROOT_ADMIN_EMAILS || '').split(',').map(e => e.trim());
-                const isRoot = rootAdmins.includes(freshUser.email);
+                const isRoot = freshUser && rootAdmins.includes(freshUser.email);
 
                 // If still USER after timeout, kick them out
                 if (freshUser && freshUser.role === 'USER' && !isRoot) {
-                    alert('등록되지 않은 사용자입니다. (Unregistered User)\n\n관리자나 심사위원으로 등록된 계정만 이용할 수 있습니다.');
+                    const msg = `등록되지 않은 사용자입니다. (Unregistered User)\n\n` +
+                        `계정: ${freshUser.email}\n` +
+                        `현재 역할: ${freshUser.role}\n\n` +
+                        `관리자나 심사위원으로 등록된 계정만 이용할 수 있습니다. ` +
+                        `등록 후 5초 이상 지났는데도 이 메시지가 보인다면 관리자에게 문의하세요.`;
+                    alert(msg);
                     logout();
                 }
                 setIsVerifying(false);
-            }, 2000); // 2 seconds verification window
+            }, 5000); // Increased to 5 seconds to allow state sync
 
             return () => clearTimeout(timer);
         }

@@ -43,10 +43,10 @@ const useStore = create((set, get) => ({
     login: (userData) => {
         // 사용자 데이터에 역할(role)이 있으면 사용 (예: Spectator), 없으면 기본값 USER
         const role = userData.role || 'USER';
-        // Normalize email to lowercase
+        // Normalize email to lowercase and trim
         const normalizedData = {
             ...userData,
-            email: userData.email.toLowerCase(),
+            email: userData.email.toLowerCase().trim(),
             role
         };
         const userToStore = { ...normalizedData, lastLoginAt: Date.now() };
@@ -61,10 +61,23 @@ const useStore = create((set, get) => ({
     logout: () => {
         set({ currentUser: null });
         localStorage.removeItem('score_program_user');
-        // Optional: clear scores or unsubscribe
-        const { unsubScores } = get();
+
+        // Clean up all subscriptions on logout
+        const { unsubScores, unsubParticipants, unsubJudges } = get();
         if (unsubScores) unsubScores();
-        set({ scores: {}, unsubScores: null });
+        if (unsubParticipants) unsubParticipants();
+        if (unsubJudges) unsubJudges();
+
+        set({
+            scores: {},
+            participants: {},
+            judgesByComp: {},
+            unsubScores: null,
+            unsubParticipants: null,
+            unsubJudges: null,
+            currentSyncedCompId: null,
+            currentSyncedCatId: null
+        });
     },
 
     // 사용자 역할(Role) 동기화 및 권한 부여
@@ -153,7 +166,8 @@ const useStore = create((set, get) => ({
             set({ currentUser: updatedUser });
             // Also update localStorage so it persists on refresh
             localStorage.setItem('score_program_user', JSON.stringify({ ...updatedUser, lastLoginAt: Date.now() }));
-            console.log(`[Auth] User Synced: ${currentUser.email} -> Role: ${role}, Name: ${finalName}`);
+            console.log(`[Auth Sync] Email: "${currentUser.email}" (len: ${currentUser.email.length}) -> Found Role: ${role}, Name: ${finalName}`);
+            console.log(`[Auth Sync] Debug: Admin Found: ${!!adminEntry}, Judge Found: ${assignedCompetitions.length > 0}`);
         }
     },
 
@@ -164,12 +178,26 @@ const useStore = create((set, get) => ({
     },
     // 현재 선택된 종목 ID 설정 (URI 상태 동기화 포함)
     setSelectedCategoryId: (id) => {
+        const prevId = get().selectedCategoryId;
+        if (prevId === id) return;
+
         set({ selectedCategoryId: id });
         window.history.pushState({
             activeView: get().activeView,
             selectedCategoryId: id,
             adminTab: get().adminTab
         }, '');
+
+        // Trigger Category-level Score Sync
+        if (id) {
+            get().syncCategoryScores(id);
+
+            // Also ensure the parent competition data is synced
+            const comp = get().competitions.find(c => (c.categories || []).some(cat => cat.id === id));
+            if (comp) {
+                get().syncCompetitionData(comp.id);
+            }
+        }
     },
     // 활성화된 뷰(화면) 설정 (URI 상태 동기화 포함)
     setActiveView: (view) => {
@@ -266,20 +294,23 @@ const useStore = create((set, get) => ({
                 break;
             }
         }
-        if (!compId) return;
 
+        if (!compId) {
+            console.error('[Store] submitCategoryScores: compId not found for category', categoryId, 'in competitions:', competitions.length);
+            return;
+        }
+
+        console.log(`[Store] submitCategoryScores START: ${categoryId}, email: ${currentUser.email}`);
         const batch = writeBatch(db);
-        const email = currentUser.email.toLowerCase();
+        const email = currentUser.email.toLowerCase().trim();
 
         // 1. Update Scores
         // scoresMap is { [participantId]: { [itemId]: value } }
+        let opCount = 0;
         for (const [pId, values] of Object.entries(scoresMap)) {
             const docId = `${categoryId}_${pId}_${email}`;
             const scoreRef = doc(db, 'scores', docId);
 
-            // Note: We use set with merge, but since we are submitting "final" state locally, 
-            // ensure we aren't overwriting other fields accidentally. 
-            // We construct the full object similar to updateScore
             batch.set(scoreRef, {
                 competition: compName,
                 genre: genre,
@@ -287,25 +318,24 @@ const useStore = create((set, get) => ({
                 categoryId,
                 participantId: pId,
                 judgeEmail: email,
-                values: values, // This overwrites the values map for this judge-participant
+                values: values,
                 updatedAt: new Date().toISOString()
             }, { merge: true });
+            opCount++;
         }
 
         // 2. Mark as Submitted in Judge's record
-        // ID: compId_email
         const judgeRef = doc(db, 'judges', `${compId}_${email}`);
-
-        // Reverting to set with merge: true after verifying it merges nested maps correctly.
-        // This is safer than update() because it creates the doc/field if it doesn't exist,
-        // preventing "Processing..." stuck states on new judges.
         batch.set(judgeRef, {
             submittedCategories: {
                 [categoryId]: true
             }
         }, { merge: true });
+        opCount++;
 
+        console.log(`[Store] Committing batch for ${opCount} operations...`);
         await batch.commit();
+        console.log('[Store] submitCategoryScores SUCCESS');
     },
 
     // 심사위원 제출 상태 토글 (제출 취소 및 수정 모드 전환)
@@ -325,7 +355,8 @@ const useStore = create((set, get) => ({
             return;
         }
 
-        const email = currentUser.email.toLowerCase();
+        console.log(`[Store] toggleJudgeSubmission START: ${categoryId} -> ${isSubmitted}`);
+        const email = currentUser.email.toLowerCase().trim();
         const judgeRef = doc(db, 'judges', `${compId}_${email}`);
 
         // Use batch for consistency with submitCategoryScores
@@ -337,7 +368,7 @@ const useStore = create((set, get) => ({
         }, { merge: true });
 
         await batch.commit();
-        console.log(`[Store] Judge submission toggled: ${categoryId} -> ${isSubmitted}`);
+        console.log(`[Store] toggleJudgeSubmission SUCCESS: ${categoryId} -> ${isSubmitted}`);
     },
 
     // 관리 관련 액션
@@ -965,15 +996,15 @@ const useStore = create((set, get) => ({
         let updateCount = 0;
 
         const collections = [
-            { coll: 'judges', idField: (data) => `${data.compId || data.yearId}_${data.email.toLowerCase()}`, emailField: 'email' },
-            { coll: 'admins', idField: (data) => data.email.toLowerCase(), emailField: 'email' }
+            { coll: 'judges', idField: (data) => `${data.compId || data.yearId}_${data.email.toLowerCase().trim()}`, emailField: 'email' },
+            { coll: 'admins', idField: (data) => data.email.toLowerCase().trim(), emailField: 'email' }
         ];
 
         for (const cfg of collections) {
             const snap = await getDocs(collection(db, cfg.coll));
             snap.docs.forEach(docSnap => {
                 const data = docSnap.data();
-                const lowerEmail = data[cfg.emailField].toLowerCase();
+                const lowerEmail = (data[cfg.emailField] || '').toLowerCase().trim();
                 const correctId = cfg.idField(data);
 
                 if (docSnap.id !== correctId || data[cfg.emailField] !== lowerEmail) {
@@ -989,11 +1020,11 @@ const useStore = create((set, get) => ({
             const data = docSnap.data();
             const parts = docSnap.id.split('_');
             if (parts.length >= 3) {
-                const lowerEmail = parts.slice(2).join('_').toLowerCase();
-                const correctId = `${parts[0]}_${parts[1]}_${lowerEmail}`;
-                if (docSnap.id !== correctId || data.judgeEmail !== lowerEmail) {
+                const emailPart = parts.slice(2).join('_').toLowerCase().trim();
+                const correctId = `${parts[0]}_${parts[1]}_${emailPart}`;
+                if (docSnap.id !== correctId || (data.judgeEmail || '').toLowerCase().trim() !== emailPart) {
                     batch.delete(docSnap.ref);
-                    batch.set(doc(db, 'scores', correctId), { ...data, judgeEmail: lowerEmail });
+                    batch.set(doc(db, 'scores', correctId), { ...data, judgeEmail: emailPart });
                     updateCount++;
                 }
             }
@@ -1122,50 +1153,127 @@ const useStore = create((set, get) => ({
         await batch.commit();
     },
 
-    // Firebase Initialization & Sync
-    // Sync state helpers
+    // Firebase Initialization & Sync (Optimized for Quota)
+    // Subscription handles
     unsubScores: null,
+    unsubParticipants: null,
+    unsubJudges: null,
+    currentSyncedCompId: null, // Track current competition sync
+    currentSyncedCatId: null,  // Track current category score sync
 
-    refreshScores: () => {
-        const { unsubScores, checkAllSynced } = get();
+    // 1. Competition-level Sync: Judges & Participants
+    syncCompetitionData: (compId) => {
+        const { unsubParticipants, unsubJudges, currentSyncedCompId } = get();
+        if (currentSyncedCompId === compId) return;
+
+        console.log(`[Sync] Switching Competition Data sync to: ${compId}`);
+
+        // Clean up previous competition-level subs
+        if (unsubParticipants) unsubParticipants();
+        if (unsubJudges) unsubJudges();
+
+        // Sync ALL Judges for THIS competition (Admins Only to avoid permission errors for judges)
+        const user = get().currentUser;
+        const isAdmin = user?.role === 'ADMIN' || user?.role === 'ROOT_ADMIN';
+
+        let unsubJ = () => { };
+        if (isAdmin) {
+            console.log(`[Sync] Triggering Competition-wide Judge sync for Admin: ${compId}`);
+            const qJudges = query(collection(db, 'judges'), where('compId', '==', compId));
+            unsubJ = onSnapshot(qJudges, (snapshot) => {
+                const list = snapshot.docs.map(doc => {
+                    const data = doc.data();
+                    return { ...data, email: (data.email || '').toLowerCase().trim() };
+                });
+                set(state => {
+                    const newJudgesByComp = { ...state.judgesByComp, [compId]: list };
+                    return { judgesByComp: newJudgesByComp };
+                });
+                get().syncUserRole();
+            }, (error) => console.error('[Sync] Admin Judges sync error:', error));
+        }
+
+        // Sync Participants for THIS competition
+        // Using 'in' query for categories (limited to 30)
+        const { competitions } = get();
+        const comp = competitions.find(c => c.id === compId);
+        const catIds = (comp?.categories || []).map(c => c.id);
+
+        let unsubP = () => { };
+        if (catIds.length > 0) {
+            // Firestore 'in' limit is 30. If more, we'd need chunks.
+            const chunks = [];
+            for (let i = 0; i < catIds.length; i += 30) {
+                chunks.push(catIds.slice(i, i + 30));
+            }
+
+            const unsubs = chunks.map(chunk => {
+                const qParts = query(collection(db, 'participants'), where('categoryId', 'in', chunk));
+                return onSnapshot(qParts, (snapshot) => {
+                    set(state => {
+                        const newParticipants = { ...state.participants };
+                        snapshot.docs.forEach(docSnap => {
+                            const p = docSnap.data();
+                            const catId = p.categoryId;
+                            if (!newParticipants[catId]) newParticipants[catId] = [];
+                            // Avoid duplicates if multiple snaps
+                            const list = newParticipants[catId].filter(item => item.id !== (p.id || docSnap.id.split('_').pop()));
+                            list.push({ ...p, id: p.id || docSnap.id.split('_').pop() });
+                            newParticipants[catId] = list;
+                        });
+                        return { participants: newParticipants };
+                    });
+                }, (error) => console.error('[Sync] Participants sync error:', error));
+            });
+            unsubP = () => unsubs.forEach(u => u());
+        }
+
+        set({
+            unsubParticipants: unsubP,
+            unsubJudges: unsubJ,
+            currentSyncedCompId: compId
+        });
+    },
+
+    // 2. Category-level Sync: Scores
+    syncCategoryScores: (catId) => {
+        const { unsubScores, currentSyncedCatId } = get();
+        if (currentSyncedCatId === catId) return;
+
+        console.log(`[Sync] Switching Category Score sync to: ${catId}`);
         if (unsubScores) unsubScores();
 
-        console.log('[Sync] Starting Scores refresh...');
-        const unsub = onSnapshot(collection(db, 'scores'),
-            (snapshot) => {
-                const scoresMap = {};
-                snapshot.docs.forEach(doc => {
-                    const data = doc.data();
-                    const parts = doc.id.split('_');
-                    if (parts.length < 3) return;
+        const qScores = query(collection(db, 'scores'), where('categoryId', '==', catId));
+        const unsubS = onSnapshot(qScores, (snapshot) => {
+            const categoryScores = {};
+            snapshot.docs.forEach(docSnap => {
+                const s = docSnap.data();
+                const pId = s.participantId;
+                const email = (s.judgeEmail || '').toLowerCase().trim();
 
-                    const catId = parts[0];
-                    const pId = parts[1];
-                    const jEmail = parts.slice(2).join('_').toLowerCase();
+                if (!categoryScores[pId]) categoryScores[pId] = {};
+                categoryScores[pId][email] = s.values;
+            });
 
-                    if (!scoresMap[catId]) scoresMap[catId] = {};
-                    if (!scoresMap[catId][pId]) scoresMap[catId][pId] = {};
-                    scoresMap[catId][pId][jEmail] = data.values;
-                });
-                set({ scores: scoresMap });
-                console.log(`[Sync] Scores updated. Categories: ${Object.keys(scoresMap).length}`);
+            set(state => ({
+                scores: { ...state.scores, [catId]: categoryScores }
+            }));
+        });
 
-                // Helper to mark synced if checkAllSynced is available
-                // Note: checkAllSynced is local to initSync scope, so we just set state directly if needed
-                // or we rely on the implementation below.
-            },
-            (error) => {
-                console.error('[Sync] Scores sync error:', error);
-                if (error.code === 'permission-denied') {
-                    console.warn('[Sync] Permission denied. Waiting for auth...');
-                }
-            }
-        );
-        set({ unsubScores: unsub });
+        set({
+            unsubScores: unsubS,
+            currentSyncedCatId: catId
+        });
+    },
+
+    // Legacy refresh (can be removed or kept as proxy)
+    refreshScores: () => {
+        const { selectedCategoryId } = get();
+        if (selectedCategoryId) get().syncCategoryScores(selectedCategoryId);
     },
 
     initSync: () => {
-        const { refreshScores, isSyncInitialized } = get();
+        const { isSyncInitialized } = get();
         if (isSyncInitialized) return;
         set({ isSyncInitialized: true });
 
@@ -1177,10 +1285,9 @@ const useStore = create((set, get) => ({
                 const TWELVE_HOURS = 12 * 60 * 60 * 1000;
 
                 if (Date.now() - userData.lastLoginAt < TWELVE_HOURS) {
-                    set({ currentUser: userData });
-                    console.log(`[Auth] Session restored for ${userData.email}`);
-                    // refreshScores will be called by login() usually, but here we do it manually after restoration
-                    get().refreshScores();
+                    const normalizedUser = { ...userData, email: (userData.email || '').toLowerCase().trim() };
+                    set({ currentUser: normalizedUser });
+                    console.log(`[Auth] Session restored for ${normalizedUser.email}`);
                 } else {
                     console.log('[Auth] Session expired');
                     localStorage.removeItem('score_program_user');
@@ -1191,126 +1298,49 @@ const useStore = create((set, get) => ({
             }
         }
 
-        // Sync General Settings
+        // 1. Sync Global/Metadata Collections (Small read count)
         onSnapshot(doc(db, 'settings', 'general'), (docSnap) => {
             if (docSnap.exists()) {
                 set({ competitionName: docSnap.data().competitionName || 'New Competition' });
-            } else {
-                setDoc(doc(db, 'settings', 'general'), { competitionName: 'Score System' });
             }
         });
 
-        // Sync Scoring Items
         onSnapshot(doc(db, 'settings', 'scoring'), (docSnap) => {
             if (docSnap.exists()) {
                 set({ scoringItems: docSnap.data().items || [] });
-            } else {
-                // Initialize with empty array if not exists
-                setDoc(doc(db, 'settings', 'scoring'), { items: [] });
             }
         });
 
-        // Local scoped sync tracker
-        let collectionsSynced = { competitions: false, judgesByComp: false, participants: false, admins: false };
-        const checkAllSynced = (key) => {
-            collectionsSynced[key] = true;
-            if (Object.values(collectionsSynced).every(v => v)) {
-                set({ isInitialSyncComplete: true });
-                get().syncUserRole();
-            }
-        };
+        onSnapshot(collection(db, 'admins'), (snapshot) => {
+            const admins = snapshot.docs.map(doc => ({ ...doc.data(), email: (doc.data().email || '').toLowerCase().trim() }));
+            set({ admins });
+            get().syncUserRole();
+        });
 
-        // Safety timeout
-        setTimeout(() => {
-            if (!get().isInitialSyncComplete) {
-                console.warn('[Sync] Safety timeout reached. Forcing sync complete.');
-                set({ isInitialSyncComplete: true });
-                get().syncUserRole();
-            }
-        }, 5000);
-
+        // 2. Sync Competitions List
         onSnapshot(collection(db, 'competitions'), (snapshot) => {
             const competitions = snapshot.docs.map(doc => doc.data());
             set({ competitions: competitions.sort((a, b) => b.name.localeCompare(a.name)) });
-            checkAllSynced('competitions');
-        });
-
-        onSnapshot(collection(db, 'judges'), (snapshot) => {
-            const grouped = {};
-            snapshot.docs.forEach(doc => {
-                const j = doc.data();
-                const normalizedJudge = { ...j, email: j.email.toLowerCase() };
-                const compId = j.compId || j.yearId;
-                if (!grouped[compId]) grouped[compId] = [];
-                grouped[compId].push(normalizedJudge);
-            });
-            set({ judgesByComp: grouped });
+            set({ isInitialSyncComplete: true });
             get().syncUserRole();
-            checkAllSynced('judgesByComp');
         });
 
-        // Sync Participants
-        const unsubParticipants = onSnapshot(collection(db, 'participants'),
-            (snapshot) => {
-                const participantsByCat = {};
-                let errorCount = 0;
-
+        // 3. User-Specific Judge Sync (Minimal read, critical for judge sidebar visibility)
+        const user = get().currentUser;
+        if (user && user.email) {
+            const q = query(collection(db, 'judges'), where('email', '==', user.email.toLowerCase().trim()));
+            onSnapshot(q, (snapshot) => {
+                const grouped = {};
                 snapshot.docs.forEach(doc => {
-                    const p = doc.data();
-                    const pId = doc.id;
-                    let catId = p.categoryId;
-
-                    // Support legacy or corrupt data where categoryId field might be missing
-                    if (!catId && pId.includes('_')) {
-                        catId = pId.split('_')[0];
-                    }
-
-                    if (catId) {
-                        if (!participantsByCat[catId]) participantsByCat[catId] = [];
-
-                        // Ensure granular fields are present even for legacy data
-                        const parts = catId.split('-');
-                        const participantData = {
-                            ...p,
-                            id: p.id || pId.split('_').pop(),
-                            categoryId: catId,
-                            competition: p.competition || p.year || parts[0],
-                            genre: p.genre || (parts.slice(1).join(' ').split(' ')[0] || 'General'),
-                            category: p.category || (parts.slice(1).join(' ').split(' ').slice(1).join(' ') || parts.slice(1).join(' '))
-                        };
-
-                        participantsByCat[catId].push(participantData);
-                    } else {
-                        errorCount++;
-                    }
+                    const j = doc.data();
+                    const compId = j.compId || j.yearId;
+                    if (!grouped[compId]) grouped[compId] = [];
+                    grouped[compId].push({ ...j, email: j.email.toLowerCase().trim() });
                 });
-
-                console.log(`[Sync] Participants updated. Count: ${snapshot.size}, Errors: ${errorCount}`);
-                set({ participants: participantsByCat });
-                checkAllSynced('participants');
-            },
-            (error) => {
-                console.error('[Sync] Participants sync error:', error);
-                if (error.code === 'permission-denied') {
-                    console.warn('[Sync] Permission denied for participants. Check Firestore Rules.');
-                }
-                checkAllSynced('participants'); // Don't block app even if error
-            }
-        );
-
-        // Sync Admins
-        onSnapshot(collection(db, 'admins'), (snapshot) => {
-            const admins = snapshot.docs.map(doc => {
-                const data = doc.data();
-                return { ...data, email: data.email.toLowerCase() };
+                set(state => ({ judgesByComp: { ...state.judgesByComp, ...grouped } }));
+                get().syncUserRole();
             });
-            set({ admins });
-            get().syncUserRole();
-            checkAllSynced('admins');
-        });
-
-        // Initial Score Sync
-        refreshScores();
+        }
     },
 
     initDefaults: async () => {

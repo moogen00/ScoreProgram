@@ -51,8 +51,13 @@ const Sidebar = ({ width, isOpen, onClose, onRequestLogout }) => {
     const [tempCatName, setTempCatName] = useState('');
     const isDeletingRef = React.useRef(false);
 
+    const { syncCompetitionData } = useStore();
     const toggleCompetition = (id) => {
-        setExpandedCompetitions(prev => ({ ...prev, [id]: !prev[id] }));
+        const nextExpanded = !expandedCompetitions[id];
+        setExpandedCompetitions(prev => ({ ...prev, [id]: nextExpanded }));
+        if (nextExpanded) {
+            syncCompetitionData(id);
+        }
     };
 
     const handleSaveCompName = () => {

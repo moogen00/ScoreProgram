@@ -15,7 +15,7 @@ const LoginPage = () => {
     const handleSuccess = async (credentialResponse) => {
         try {
             const decoded = jwtDecode(credentialResponse.credential);
-            const email = decoded.email;
+            const email = decoded.email.toLowerCase(); // Force lowercase
 
             // Check permissions
             const rootAdmins = (import.meta.env.VITE_ROOT_ADMIN_EMAILS || '').split(',').map(e => e.trim());
@@ -23,12 +23,26 @@ const LoginPage = () => {
             const isAdmin = isRootAdmin || Object.values(admins || {}).some(a => a.email === email);
             const isJudge = Object.values(judgesByComp || {}).some(compJudges => compJudges.some(j => j.email === email));
 
+            // Debugging Alert
+            console.log('Login Debug:', { email, isJudge, isAdmin, judgesByComp, PROD: import.meta.env.PROD });
+
             // Strict Check: Enforce strictly in Production, allow loose access in Dev
             if (import.meta.env.PROD && !isAdmin && !isJudge) {
-                alert('권한이 없는 계정입니다. (Unauthorized Account)\n\n관리자나 심사위원으로 등록된 계정만 로그인할 수 있습니다.');
+                const registeredJudges = Object.values(judgesByComp || {}).flat().map(j => `[${j.email}](${j.email.length})`);
+                const registeredAdmins = (admins || []).map(a => `[${a.email}](${a.email.length})`);
+
+                let debugMsg = `[로그인 권한 진단]\n\n`;
+                debugMsg += `입력된 이메일: "${email}" (길이: ${email.length})\n`;
+                debugMsg += `Root Admin 여부: ${isRootAdmin ? 'YES' : 'NO'}\n`;
+                debugMsg += `일반 Admin 여부: ${isAdmin ? 'YES' : 'NO'}\n`;
+                debugMsg += `심사위원 여부: ${isJudge ? 'YES' : 'NO'}\n\n`;
+                debugMsg += `등록된 Admins: ${registeredAdmins.join(', ') || '없음'}\n`;
+                debugMsg += `등록된 Judges: ${registeredJudges.join(', ') || '없음'}\n\n`;
+                debugMsg += `※ 이메일 대소문자나 뒤에 공백이 있는지 확인해주세요.`;
+
+                alert(debugMsg);
                 return;
             }
-
             // Firebase Authentication Bridge
             const credential = GoogleAuthProvider.credential(credentialResponse.credential);
             await signInWithCredential(auth, credential);
