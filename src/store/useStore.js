@@ -438,25 +438,38 @@ const useStore = create((set, get) => ({
     },
 
     // 관리 관련 액션
-    // 새로운 채점 항목 추가
-    addScoringItem: async (label) => {
+    // 새로운 채점 항목 추가 (대회별)
+    addScoringItem: async (compId, label) => {
         const item = {
             id: Math.random().toString(36).substr(2, 9),
             label,
-            order: get().scoringItems.length
+            order: 999 // Append to end, reordering handles exact order
         };
-        await setDoc(doc(db, 'settings', 'scoring'), { items: [...get().scoringItems, item] });
+
+        const compRef = doc(db, 'competitions', compId);
+        const compSnap = await getDoc(compRef);
+        if (compSnap.exists()) {
+            const currentItems = compSnap.data().scoringItems || [];
+            item.order = currentItems.length;
+            await updateDoc(compRef, { scoringItems: [...currentItems, item] });
+        }
     },
 
-    // 채점 항목 삭제
-    removeScoringItem: async (id) => {
-        const items = get().scoringItems.filter(item => item.id !== id);
-        await setDoc(doc(db, 'settings', 'scoring'), { items });
+    // 채점 항목 삭제 (대회별)
+    removeScoringItem: async (compId, itemId) => {
+        const compRef = doc(db, 'competitions', compId);
+        const compSnap = await getDoc(compRef);
+        if (compSnap.exists()) {
+            const currentItems = compSnap.data().scoringItems || [];
+            const newItems = currentItems.filter(item => item.id !== itemId);
+            await updateDoc(compRef, { scoringItems: newItems });
+        }
     },
 
-    // 채점 항목 순서 변경
-    updateScoringItemOrder: async (newItems) => {
-        await setDoc(doc(db, 'settings', 'scoring'), { items: newItems });
+    // 채점 항목 순서 변경 (대회별)
+    updateScoringItemOrder: async (compId, newItems) => {
+        const compRef = doc(db, 'competitions', compId);
+        await updateDoc(compRef, { scoringItems: newItems });
     },
 
     // 계층 구조(대회) 관리 액션
@@ -468,7 +481,13 @@ const useStore = create((set, get) => ({
             name,
             locked: false,
             createdAt: new Date().toISOString(),
-            categories: []
+            categories: [],
+            // Initialize with Default Scoring Items
+            scoringItems: [
+                { id: Math.random().toString(36).substr(2, 9), label: '베이직 턴 기술부분', order: 0 },
+                { id: Math.random().toString(36).substr(2, 9), label: '음악 타이밍등 뮤지컬리티', order: 1 },
+                { id: Math.random().toString(36).substr(2, 9), label: '안무 표현등의 예술부문', order: 2 }
+            ]
         };
         await setDoc(doc(db, 'competitions', id), comp);
     },
@@ -618,6 +637,22 @@ const useStore = create((set, get) => ({
                 locked: isLocked,
                 categories: updatedCategories
             });
+        }
+    },
+
+    // 종목 잠금/해제 토글
+    toggleCategoryLock: async (compId, categoryId, isLocked) => {
+        const compRef = doc(db, 'competitions', compId);
+        const compSnap = await getDoc(compRef);
+        if (compSnap.exists()) {
+            const data = compSnap.data();
+            const updatedCategories = (data.categories || []).map(cat => {
+                if (cat.id === categoryId) {
+                    return { ...cat, locked: isLocked };
+                }
+                return cat;
+            });
+            await updateDoc(compRef, { categories: updatedCategories });
         }
     },
 
@@ -868,8 +903,6 @@ const useStore = create((set, get) => ({
                 scores: data.scores || {},
                 settings: {
                     general: data.settings.general || { competitionName: get().competitionName },
-                    scoring: data.settings.scoring || { items: get().scoringItems },
-                    // Legacy support
                 }
             };
 
@@ -958,13 +991,10 @@ const useStore = create((set, get) => ({
                 batch.set(doc(db, 'competitions', comp.id), cleanedComp);
             });
 
-            // 2.1 Import Settings (General & Scoring)
+            // 2.1 Import Settings (General Only)
             if (data.settings) {
                 if (data.settings.general) {
                     batch.set(doc(db, 'settings', 'general'), data.settings.general);
-                }
-                if (data.settings.scoring) {
-                    batch.set(doc(db, 'settings', 'scoring'), data.settings.scoring);
                 }
             }
 
@@ -1064,7 +1094,20 @@ const useStore = create((set, get) => ({
             // Reset competition name to default
             settingsBatch.set(doc(db, 'settings', 'general'), { competitionName: 'Latin Dance Score System' });
 
-            settingsBatch.set(doc(db, 'settings', 'scoring'), { items: [] });
+
+
+            // Restore Root Admin(s) from .env
+            const rootEmails = (import.meta.env.VITE_ROOT_ADMIN_EMAILS || '').split(',').map(e => e.trim());
+            for (const email of rootEmails) {
+                if (email) {
+                    settingsBatch.set(doc(db, 'admins', email), {
+                        email: email,
+                        role: 'ROOT_ADMIN',
+                        createdAt: new Date().toISOString()
+                    });
+                }
+            }
+
             await settingsBatch.commit();
 
             set({ resetStatus: '데이터 정제 완료' });
@@ -1190,9 +1233,18 @@ const useStore = create((set, get) => ({
     },
 
     seedRandomScores: async (compId) => {
-        const { competitions, participants, scoringItems } = get();
+        const { competitions, participants } = get();
         const comp = competitions.find(c => c.id === compId);
         if (!comp) return;
+
+        // Use competition's scoring items or defaults
+        const currentScoringItems = (comp.scoringItems && comp.scoringItems.length > 0)
+            ? comp.scoringItems
+            : [
+                { id: 'default_1', label: 'Tech' },
+                { id: 'default_2', label: 'Music' },
+                { id: 'default_3', label: 'Art' }
+            ];
 
         const batch = writeBatch(db);
         const mockJudges = [
@@ -1216,7 +1268,7 @@ const useStore = create((set, get) => ({
                     const docId = `${cat.id}_${p.id}_${safeEmail}`;
                     const scoreRef = doc(db, 'scores', docId);
                     const values = {};
-                    scoringItems.forEach(item => {
+                    currentScoringItems.forEach(item => {
                         // Generate random score between 5.5 and 9.9 for realism (matching UI limits)
                         values[item.id] = parseFloat((Math.random() * 4.4 + 5.5).toFixed(1));
                     });
@@ -1418,11 +1470,7 @@ const useStore = create((set, get) => ({
             }
         });
 
-        onSnapshot(doc(db, 'settings', 'scoring'), (docSnap) => {
-            if (docSnap.exists()) {
-                set({ scoringItems: docSnap.data().items || [] });
-            }
-        });
+        // Legacy 'settings/scoring' listener removed
 
         onSnapshot(collection(db, 'admins'), (snapshot) => {
             const admins = snapshot.docs.map(doc => ({ ...doc.data(), email: (doc.data().email || '').toLowerCase().trim() }));
@@ -1444,7 +1492,7 @@ const useStore = create((set, get) => ({
 
     // New Action: Sync User Specific Data (Judges)
     syncUserSpecificData: () => {
-        const { currentUser, unsubJudges } = get();
+        const { currentUser, unsubJudges, competitions } = get();
 
         // Clean up existing subscription if any
         if (unsubJudges) {
@@ -1459,25 +1507,27 @@ const useStore = create((set, get) => ({
                 const grouped = {};
                 snapshot.docs.forEach(doc => {
                     const j = doc.data();
-
-                    // Filter out legacy records with dots in ID (Ghost records)
-                    // We only want the standardized record (underscores)
-                    // The expected ID format is `${compId}_${email.replace(/\./g, '_')}`
-                    // or `${compId}_${email}` if email has no dots? 
-                    // To be safe, if we have duplicate records (one matches ID with dots, one matches ID with underscores),
-                    // we prefer the one that matches the Underscore logic.
-                    // Actually, simpler check: if doc.id contains a dot in the email part, skip it if we have underscores?
-                    // Let's strictly enforce that we only use the doc if its ID matches the sanitization logic.
-
                     const compId = j.compId || j.yearId;
+
+                    // 1. Check if Competition Exists (Ghost Check)
+                    // If the competition ID stored in the judge record is NOT in our active competitions list,
+                    // it means the competition was deleted but this record survived. Prune it.
+                    // (Ensure competitions list is populated first - isInitialSyncComplete ensures this mostly, but safe to check if competitions.length > 0)
+                    const comps = get().competitions;
+                    if (comps.length > 0 && compId && !comps.some(c => c.id === compId)) {
+                        console.warn(`[Store] Found Orphan Judge Record (Comp Deleted): ${doc.id}. Auto-deleting...`);
+                        deleteDoc(doc.ref);
+                        return;
+                    }
+
+                    // 2. Format & Legacy Check
                     const safeEmail = j.email.toLowerCase().trim().replace(/\./g, '_');
                     const expectedId = `${compId}_${safeEmail}`;
 
-                    // If the document ID does NOT match the expected Underscore format, 
-                    // AND it's different from the one we expect (e.g. it has dots), we skip it.
-                    // This assumes the correct record IS the underscored one.
                     if (doc.id !== expectedId) {
                         console.warn(`[Store] Skipping legacy/mismatch judge record: ${doc.id} (Expected: ${expectedId})`);
+                        // Optional: delete legacy format if strictly enforcing?
+                        // deleteDoc(doc.ref); 
                         return;
                     }
 

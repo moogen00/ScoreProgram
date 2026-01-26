@@ -9,7 +9,7 @@ function cn(...inputs) {
 }
 
 const Scorer = () => {
-    const { scoringItems, updateScore, submitCategoryScores, toggleJudgeSubmission, selectedCategoryId, scores, participants, currentUser, competitions, judgesByComp, isInitialSyncComplete } = useStore();
+    const { scoringItems: globalScoringItems, updateScore, submitCategoryScores, toggleJudgeSubmission, selectedCategoryId, scores, participants, currentUser, competitions, judgesByComp, isInitialSyncComplete } = useStore();
 
     console.log(`[Scorer] Rendering. Category: ${selectedCategoryId}, Participants count: ${participants[selectedCategoryId]?.length || 0}`);
     if (participants[selectedCategoryId]) {
@@ -27,6 +27,10 @@ const Scorer = () => {
     const currentCompId = currentComp?.id;
     const categoryName = useMemo(() => currentComp?.categories?.find(c => c.id === selectedCategoryId)?.name || '', [currentComp, selectedCategoryId]);
     const isSolo = useMemo(() => categoryName.toUpperCase().includes('SOLO'), [categoryName]);
+
+    // Competition-Specific Scoring Items
+    // Use competition items if available, otherwise empty (or fallback if we wanted, but user said no global fallback)
+    const scoringItems = useMemo(() => currentComp?.scoringItems || [], [currentComp]);
 
     // 권한 및 잠금 상태 로직
     const isCompLocked = currentComp?.locked;

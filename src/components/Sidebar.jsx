@@ -310,19 +310,9 @@ const Sidebar = ({ width, isOpen, onClose, onRequestLogout }) => {
 
 
             <div className="flex-1 overflow-y-auto py-6 px-4 space-y-2 custom-scrollbar">
+                {/* Header - No Add Button */}
                 <div className="flex items-center justify-between px-2 mb-4">
                     <h2 className="text-[12px] font-black text-slate-400 uppercase tracking-widest">Competition Hierarchy</h2>
-                    {(userRole === 'ADMIN' || userRole === 'ROOT_ADMIN') && (
-                        <button
-                            onClick={() => setIsAddingCompetition(!isAddingCompetition)}
-                            className={cn(
-                                "p-1 rounded-md transition-colors",
-                                isAddingCompetition ? "bg-rose-500/20 text-rose-400" : "hover:bg-white/10 text-slate-500 hover:text-indigo-400"
-                            )}
-                        >
-                            {isAddingCompetition ? <Plus size={14} className="rotate-45" /> : <Plus size={14} />}
-                        </button>
-                    )}
                 </div>
 
                 {isAddingCompetition && (
@@ -363,53 +353,7 @@ const Sidebar = ({ width, isOpen, onClose, onRequestLogout }) => {
                                     {expandedCompetitions[comp.id] ? <ChevronDown size={14} className="mr-2 text-indigo-400 shrink-0" /> : <ChevronRight size={14} className="mr-2 text-slate-600 shrink-0" />}
                                     <Calendar size={14} className={cn("mr-3 transition-colors shrink-0", expandedCompetitions[comp.id] ? "text-indigo-400" : "text-slate-600")} />
                                     <span className={cn("flex-1 min-w-0 text-left font-bold transition-colors text-sm whitespace-normal break-words leading-tight py-1", expandedCompetitions[comp.id] ? "text-white" : "text-slate-400")}>{comp.name}</span>
-                                    {(userRole === 'ADMIN' || userRole === 'ROOT_ADMIN') && (
-                                        <div
-                                            className="flex items-center gap-0.5 opacity-0 group-hover/btn:opacity-100 transition-opacity mr-2 shrink-0"
-                                            onClick={(e) => e.stopPropagation()}
-                                            onMouseDown={(e) => e.stopPropagation()}
-                                            onPointerDown={(e) => e.stopPropagation()}
-                                        >
-                                            <button
-                                                onClick={(e) => {
-                                                    e.preventDefault();
-                                                    e.stopPropagation();
-                                                    handleToggleCompetitionLock(e, comp);
-                                                }}
-                                                onMouseDown={(e) => e.stopPropagation()}
-                                                className={cn("p-1.5 rounded-lg transition-colors", comp.locked ? "text-rose-400 bg-rose-500/10" : "text-emerald-400 hover:bg-emerald-500/10")}
-                                                title={comp.locked ? "대회 잠금 해제" : "대회 잠금"}
-                                            >
-                                                {comp.locked ? <Lock size={14} /> : <Unlock size={14} />}
-                                            </button>
-                                            <button
-                                                onClick={(e) => {
-                                                    e.preventDefault();
-                                                    e.stopPropagation();
-                                                    setEditingCompId(comp.id);
-                                                    setTempCompIdName(comp.name);
-                                                }}
-                                                onMouseDown={(e) => e.stopPropagation()}
-                                                className="p-1 text-slate-500 hover:text-indigo-400 rounded hover:bg-white/10"
-                                                title="수정"
-                                            >
-                                                <Edit2 size={12} />
-                                            </button>
-                                            <button
-                                                onClick={(e) => {
-                                                    e.preventDefault();
-                                                    e.stopPropagation();
-                                                    handleDeleteCompetition(e, comp.id);
-                                                }}
-                                                onMouseDown={(e) => e.stopPropagation()}
-                                                className="p-1.5 text-slate-500 hover:text-rose-400 hover:bg-rose-500/10 rounded-lg transition-colors"
-                                                title="대회 삭제"
-                                            >
-                                                <Trash2 size={14} />
-                                            </button>
-                                        </div>
-                                    )}
-                                    {comp.locked && (userRole !== 'ADMIN' && userRole !== 'ROOT_ADMIN') && <Lock size={12} className="text-rose-400 mr-2" />}
+                                    {comp.locked && <Lock size={12} className="text-rose-400 mr-2" />}
                                 </div>
                             )}
                         </div>
@@ -450,17 +394,7 @@ const Sidebar = ({ width, isOpen, onClose, onRequestLogout }) => {
                                                 onBlur={() => !newCatName && setAddingCatFor(null)}
                                             />
                                         </div>
-                                    ) : (
-                                        (userRole === 'ADMIN' || userRole === 'ROOT_ADMIN') && (
-                                            <button
-                                                onClick={() => setAddingCatFor(comp.id)}
-                                                className="sidebar-item w-full flex items-center gap-2 text-slate-600 hover:text-indigo-400 pl-6 py-2 group/add"
-                                            >
-                                                <Plus size={10} className="group-hover/add:rotate-90 transition-transform" />
-                                                <span className="text-[10px] font-black uppercase tracking-widest">Add Category</span>
-                                            </button>
-                                        )
-                                    )}
+                                    ) : null}
                                 </motion.div>
                             )}
                         </AnimatePresence>
@@ -581,65 +515,7 @@ const CategoryItem = React.memo(({
                     )}
                     <Layers size={12} className={cn("shrink-0 mt-2", isActive ? "text-indigo-400" : "text-slate-700")} />
                     <span className="flex-1 min-w-0 whitespace-normal break-words leading-tight py-1.5 mr-2">{cat.name}</span>
-                    {(userRole === 'ADMIN' || userRole === 'ROOT_ADMIN') && (
-                        <div
-                            className="flex items-center gap-0.5 shrink-0 min-w-max opacity-0 group-hover/item:opacity-100 transition-opacity mt-1"
-                            onClick={stopEvents}
-                            onMouseDown={stopEvents}
-                            onMouseUp={stopEvents}
-                            onPointerDown={stopEvents}
-                            onPointerUp={stopEvents}
-                        >
-                            <button
-                                onClick={(e) => {
-                                    e.preventDefault();
-                                    e.stopPropagation();
-                                    handleToggleCategoryLock(e, compId, cat);
-                                }}
-                                onMouseDown={stopEvents}
-                                onMouseUp={stopEvents}
-                                onPointerDown={stopEvents}
-                                onPointerUp={stopEvents}
-                                className={cn("p-1 hover:bg-white/10 rounded shrink-0", cat.locked ? "text-rose-400 opacity-100" : "text-emerald-400")}
-                                title={cat.locked ? "잠금 해제" : "잠금"}
-                            >
-                                {cat.locked ? <Lock size={12} /> : <Unlock size={12} />}
-                            </button>
-                            <button
-                                onClick={(e) => {
-                                    e.preventDefault();
-                                    e.stopPropagation();
-                                    handleEditCategory(e, cat);
-                                }}
-                                onMouseDown={stopEvents}
-                                onMouseUp={stopEvents}
-                                onPointerDown={stopEvents}
-                                onPointerUp={stopEvents}
-                                className="p-1 text-slate-400 hover:text-white hover:bg-white/10 rounded shrink-0"
-                                title="수정"
-                            >
-                                <Edit2 size={12} />
-                            </button>
-                            <button
-                                onClick={(e) => {
-                                    e.preventDefault();
-                                    e.stopPropagation();
-                                    handleDeleteCategory(compId, cat.id, cat.name);
-                                }}
-                                onMouseDown={(e) => {
-                                    e.stopPropagation();
-                                }}
-                                onMouseUp={stopEvents}
-                                onPointerDown={stopEvents}
-                                onPointerUp={stopEvents}
-                                className="p-1 text-slate-500 hover:text-rose-400 hover:bg-white/10 rounded transition-colors shrink-0"
-                                title="삭제"
-                            >
-                                <Trash2 size={12} />
-                            </button>
-                        </div>
-                    )}
-                    {cat.locked && (userRole !== 'ADMIN' && userRole !== 'ROOT_ADMIN') && <Lock size={12} className="text-rose-400 mr-2 shrink-0 mt-2" />}
+                    {cat.locked && <Lock size={12} className="text-rose-400 mr-2 shrink-0 mt-2" />}
                 </div>
             )}
         </Reorder.Item>

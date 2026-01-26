@@ -16,12 +16,14 @@ const AdminPanel = () => {
         participants, addParticipant, removeParticipant, updateParticipant, moveParticipants,
         selectedCategoryId, competitions, scores,
         addCategory, updateCategory, deleteCategory, moveCategory, sortCategoriesByName, toggleCompetitionLock,
-        admins, addAdmin, removeAdmin, competitionName, setCompetitionName,
+        competitionName, setCompetitionName,
         seedRandomScores, clearCompetitionScores,
         exportData, importData, clearAllData, normalizeDatabase, fixLockedProperties,
         currentUser, syncCompetitionData,
         adminTab, setAdminTab,
-        isResetting, resetStatus, isExporting
+        isResetting, resetStatus, isExporting,
+        addCompetition, updateCompetition, deleteCompetition,
+        toggleCategoryLock
     } = useStore();
 
     // 폼 입력 상태 (새로운 데이터 추가용)
@@ -38,6 +40,10 @@ const AdminPanel = () => {
     // 관리 대상 선택 상태 (대회 및 종목)
     const [manageCompId, setManageCompId] = useState('');
     const [manageCatId, setManageCatId] = useState('');
+
+    // Derived state for scoring items
+    const managedComp = useMemo(() => competitions.find(c => c.id === manageCompId), [competitions, manageCompId]);
+    const managedScoringItems = useMemo(() => managedComp?.scoringItems || [], [managedComp]);
 
     // 계층 구조 관리 상태 (수정 모드)
     const [editingCatId, setEditingCatId] = useState(null);
@@ -80,8 +86,9 @@ const AdminPanel = () => {
     // 채점 항목 추가 핸들러
     const handleAddScoring = (e) => {
         e.preventDefault();
+        if (!manageCompId) return alert('대회를 선택해주세요.');
         if (newItemLabel.trim()) {
-            addScoringItem(newItemLabel.trim());
+            addScoringItem(manageCompId, newItemLabel.trim());
             setNewItemLabel('');
         }
     };
@@ -183,11 +190,12 @@ const AdminPanel = () => {
 
     // 리스트 순서 변경 핸들러
     const move = (index, direction) => {
-        const newItems = [...scoringItems];
+        if (!manageCompId) return;
+        const newItems = [...managedScoringItems];
         const targetIndex = index + direction;
         if (targetIndex < 0 || targetIndex >= newItems.length) return;
         [newItems[index], newItems[targetIndex]] = [newItems[targetIndex], newItems[index]];
-        updateScoringItemOrder(newItems.map((item, i) => ({ ...item, order: i })));
+        updateScoringItemOrder(manageCompId, newItems.map((item, i) => ({ ...item, order: i })));
     };
 
     // 채점 항목 삭제 핸들러 (점수 존재 여부 체크)
@@ -223,7 +231,7 @@ const AdminPanel = () => {
                 return;
             }
         }
-        removeScoringItem(itemId);
+        removeScoringItem(manageCompId, itemId);
     };
 
     // 참가자 삭제 핸들러 (점수 존재 여부 체크)
@@ -382,6 +390,7 @@ const AdminPanel = () => {
             <div className="px-5 mb-5 overflow-x-auto no-scrollbar">
                 <div className="flex bg-black/40 p-1 rounded-xl border border-white/10 shadow-inner min-w-max gap-1">
                     {[
+                        { id: 'competitions', label: '대회/종목 설정', icon: Trophy, color: 'text-rose-400' },
                         { id: 'scoring', label: '채점 항목', icon: List, color: 'text-indigo-400' },
                         { id: 'participants', label: '참가자 관리', icon: UserPlus, color: 'text-emerald-400' },
                         { id: 'all_participants', label: '전체 참가자 현황', icon: Layout, color: 'text-indigo-400' },
@@ -413,39 +422,164 @@ const AdminPanel = () => {
 
             {/* Part 3: Panel (Content) */}
             <div className="px-5 space-y-8">
-                {adminTab === 'scoring' && (
+                {adminTab === 'competitions' && (
                     <div className="glass-card p-8 animate-in fade-in slide-in-from-bottom-2 duration-500">
                         <div className="flex items-center gap-2 mb-6">
-                            <List className="text-indigo-400" />
-                            <h2 className="text-xl font-bold text-white">채점 항목 설정</h2>
+                            <Trophy className="text-rose-400" />
+                            <h2 className="text-xl font-bold text-white">대회 및 종목 관리</h2>
                         </div>
-                        <form onSubmit={handleAddScoring} className="flex gap-4 mb-8">
-                            <input
-                                type="text"
-                                value={newItemLabel}
-                                onChange={(e) => setNewItemLabel(e.target.value)}
-                                placeholder="새 채점 항목 이름"
-                                className="flex-1 bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-white focus:ring-2 focus:ring-indigo-500/50 outline-none"
-                            />
-                            <button type="submit" className="bg-indigo-600 hover:bg-indigo-500 text-white px-8 py-3 rounded-xl font-bold flex items-center gap-2 transition-all hover:scale-[1.02]">
-                                <Plus size={20} /> 추가
-                            </button>
-                        </form>
-                        <div className="space-y-3">
-                            {scoringItems.sort((a, b) => a.order - b.order).map((item, index) => (
-                                <div key={item.id} className="flex items-center justify-between p-4 bg-white/5 border border-white/10 rounded-xl group hover:bg-white/10 transition-all">
-                                    <div className="flex items-center gap-4">
-                                        <span className="w-8 h-8 rounded-lg bg-indigo-500/20 text-indigo-400 flex items-center justify-center font-bold text-sm">{index + 1}</span>
-                                        <span className="font-bold text-lg text-white/90">{item.label}</span>
+
+                        {/* New Competition Input */}
+                        <div className="mb-8 p-4 bg-white/5 border border-white/10 rounded-xl">
+                            <form onSubmit={(e) => {
+                                e.preventDefault();
+                                const val = e.target.newCompName.value.trim();
+                                if (val) { addCompetition(val); e.target.newCompName.value = ''; }
+                            }} className="flex gap-2">
+                                <input name="newCompName" placeholder="새 대회 이름 (예: 2025 Grand Prix)" className="flex-1 bg-black/40 border border-white/10 rounded-lg px-3 py-2 text-white outline-none" />
+                                <button type="submit" className="bg-rose-600 hover:bg-rose-500 text-white px-4 py-2 rounded-lg font-bold text-sm">대회 추가</button>
+                            </form>
+                        </div>
+
+                        <div className="space-y-4">
+                            {competitions.map(comp => (
+                                <div key={comp.id} className="bg-black/20 border border-white/10 rounded-xl p-4">
+                                    <div className="flex items-center justify-between mb-4">
+                                        <div className="flex items-center gap-3">
+                                            {comp.locked ? <Lock className="text-rose-400" size={20} /> : <Unlock className="text-emerald-400" size={20} />}
+                                            <span className="text-lg font-bold text-white">{comp.name}</span>
+                                            <span className="text-xs text-slate-500">ID: {comp.id}</span>
+                                        </div>
+                                        <div className="flex items-center gap-2">
+                                            <button
+                                                onClick={() => {
+                                                    const msg = comp.locked ? '대회 잠금을 해제하시겠습니까?' : '대회를 잠금 하시겠습니까? (모든 종목 포함)';
+                                                    if (confirm(msg)) toggleCompetitionLock(comp.id, !comp.locked);
+                                                }}
+                                                className={`px-3 py-1 rounded-lg text-xs font-bold ${comp.locked ? 'bg-emerald-600/20 text-emerald-400 hover:bg-emerald-600/40' : 'bg-rose-600/20 text-rose-400 hover:bg-rose-600/40'}`}
+                                            >
+                                                {comp.locked ? '잠금 해제 (Unlock)' : '대회 잠금 (Lock)'}
+                                            </button>
+                                            <button
+                                                onClick={() => {
+                                                    const newName = prompt('대회 이름을 수정하시겠습니까?', comp.name);
+                                                    if (newName && newName.trim()) updateCompetition(comp.id, newName.trim());
+                                                }}
+                                                className="p-2 hover:bg-white/10 rounded-lg text-slate-400 hover:text-white"
+                                            >
+                                                <Edit2 size={16} />
+                                            </button>
+                                            <button
+                                                onClick={() => { if (confirm('대회와 관련된 모든 점수/참가자가 삭제됩니다. 정말 삭제하시겠습니까?')) deleteCompetition(comp.id); }}
+                                                className="p-2 hover:bg-rose-500/20 rounded-lg text-rose-400"
+                                            >
+                                                <Trash2 size={16} />
+                                            </button>
+                                        </div>
                                     </div>
-                                    <div className="flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                                        <button onClick={() => move(index, -1)} disabled={index === 0} className="p-2 hover:bg-white/10 rounded-lg text-slate-400 disabled:opacity-10"><ArrowUp size={18} /></button>
-                                        <button onClick={() => move(index, 1)} disabled={index === scoringItems.length - 1} className="p-2 hover:bg-white/10 rounded-lg text-slate-400 disabled:opacity-10"><ArrowDown size={18} /></button>
-                                        <button onClick={() => handleDeleteScoringItem(item.id)} className="p-2 hover:bg-rose-500/20 rounded-lg text-rose-400"><Trash2 size={18} /></button>
+
+                                    {/* Categories */}
+                                    <div className="pl-4 border-l-2 border-white/5 space-y-2">
+                                        <div className="flex items-center justify-between gap-4 mb-2">
+                                            <h4 className="text-xs font-black text-slate-500 uppercase tracking-widest">Detail Categories</h4>
+                                            <button
+                                                onClick={() => {
+                                                    const name = prompt('새 종목 이름 (예: Professional Solo)');
+                                                    if (name) addCategory(comp.id, name);
+                                                }}
+                                                className="text-[10px] bg-slate-700 hover:bg-slate-600 text-white px-2 py-1 rounded"
+                                            >
+                                                + 종목 추가
+                                            </button>
+                                        </div>
+                                        {(comp.categories || []).map(cat => (
+                                            <div key={cat.id} className="flex items-center justify-between bg-white/5 p-2 rounded-lg">
+                                                <div className="flex items-center gap-2">
+                                                    {cat.locked ? <Lock size={12} className="text-rose-400" /> : <Unlock size={12} className="text-emerald-400" />}
+                                                    <span className="text-sm text-white font-bold">{cat.name}</span>
+                                                </div>
+                                                <div className="flex items-center gap-2">
+                                                    <button
+                                                        onClick={() => {
+                                                            const msg = cat.locked ? `'${cat.name}' 잠금을 해제하시겠습니까?` : `'${cat.name}' 종목을 잠금 하시겠습니까?`;
+                                                            if (confirm(msg)) toggleCategoryLock(comp.id, cat.id, !cat.locked);
+                                                        }}
+                                                        className={`text-[10px] px-2 py-1 rounded font-bold ${cat.locked ? 'text-emerald-400 bg-emerald-500/10' : 'text-rose-400 bg-rose-500/10'}`}
+                                                    >
+                                                        {cat.locked ? 'Unlock' : 'Lock'}
+                                                    </button>
+                                                    <button
+                                                        onClick={() => {
+                                                            const newName = prompt('수정할 종목 이름을 입력하세요:', cat.name);
+                                                            if (newName && newName.trim()) updateCategory(comp.id, cat.id, newName.trim());
+                                                        }}
+                                                        className="text-slate-500 hover:text-indigo-400"
+                                                        title="종목명 수정"
+                                                    >
+                                                        <Edit2 size={14} />
+                                                    </button>
+                                                    <button onClick={() => { if (confirm('종목 삭제?')) deleteCategory(comp.id, cat.id); }} className="text-slate-500 hover:text-rose-400"><X size={14} /></button>
+                                                </div>
+                                            </div>
+                                        ))}
                                     </div>
                                 </div>
                             ))}
                         </div>
+                    </div>
+                )}
+                {adminTab === 'scoring' && (
+                    <div className="glass-card p-8 animate-in fade-in slide-in-from-bottom-2 duration-500">
+                        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-6">
+                            <div className="flex items-center gap-2">
+                                <List className="text-indigo-400" />
+                                <h2 className="text-xl font-bold text-white">채점 항목 설정</h2>
+                            </div>
+                            <select value={manageCompId} onChange={(e) => { setManageCompId(e.target.value); }} className="bg-black/40 border border-white/10 rounded-xl px-4 py-2 text-white text-xs outline-none">
+                                <option value="">대회 선택</option>
+                                {competitions.map(y => <option key={y.id} value={y.id}>{y.name}</option>)}
+                            </select>
+                        </div>
+
+                        {manageCompId ? (
+                            <>
+                                <form onSubmit={handleAddScoring} className="flex gap-4 mb-8">
+                                    <input
+                                        type="text"
+                                        value={newItemLabel}
+                                        onChange={(e) => setNewItemLabel(e.target.value)}
+                                        placeholder="새 채점 항목 이름"
+                                        className="flex-1 bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-white focus:ring-2 focus:ring-indigo-500/50 outline-none"
+                                    />
+                                    <button type="submit" className="bg-indigo-600 hover:bg-indigo-500 text-white px-8 py-3 rounded-xl font-bold flex items-center gap-2 transition-all hover:scale-[1.02]">
+                                        <Plus size={20} /> 추가
+                                    </button>
+                                </form>
+                                <div className="space-y-3">
+                                    {managedScoringItems.sort((a, b) => a.order - b.order).map((item, index) => (
+                                        <div key={item.id} className="flex items-center justify-between p-4 bg-white/5 border border-white/10 rounded-xl group hover:bg-white/10 transition-all">
+                                            <div className="flex items-center gap-4">
+                                                <span className="w-8 h-8 rounded-lg bg-indigo-500/20 text-indigo-400 flex items-center justify-center font-bold text-sm">{index + 1}</span>
+                                                <span className="font-bold text-lg text-white/90">{item.label}</span>
+                                            </div>
+                                            <div className="flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                                                <button onClick={() => move(index, -1)} disabled={index === 0} className="p-2 hover:bg-white/10 rounded-lg text-slate-400 disabled:opacity-10"><ArrowUp size={18} /></button>
+                                                <button onClick={() => move(index, 1)} disabled={index === managedScoringItems.length - 1} className="p-2 hover:bg-white/10 rounded-lg text-slate-400 disabled:opacity-10"><ArrowDown size={18} /></button>
+                                                <button onClick={() => handleDeleteScoringItem(item.id)} className="p-2 hover:bg-rose-500/20 rounded-lg text-rose-400"><Trash2 size={18} /></button>
+                                            </div>
+                                        </div>
+                                    ))}
+                                    {managedScoringItems.length === 0 && (
+                                        <div className="text-center py-8 text-slate-500 text-sm">등록된 채점 항목이 없습니다.</div>
+                                    )}
+                                </div>
+                            </>
+                        ) : (
+                            <div className="py-20 text-center border-2 border-dashed border-white/5 rounded-2xl">
+                                <List className="mx-auto text-white/5 mb-4" size={48} />
+                                <p className="text-slate-500 font-bold uppercase tracking-widest text-sm">대회를 선택하여 채점 항목을 관리하세요</p>
+                            </div>
+                        )}
                     </div>
                 )}
 
