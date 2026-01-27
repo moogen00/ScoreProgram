@@ -253,7 +253,7 @@ const AdminPanel = () => {
         removeParticipant(categoryId, pId);
     };
 
-    // 참가자별 점수 합계 및 평균 계산 (랭킹 산정용)
+    // 참가자별 점수 합계 및 평균 계산 (랭킹 산정용) - 동점자 체크 추가
     const getScoredParticipants = useCallback((ps, catScores) => {
         if (!ps || ps.length === 0) return [];
 
@@ -273,17 +273,29 @@ const AdminPanel = () => {
         }).sort((a, b) => b.average - a.average);
 
         const rankMap = new Map();
+        const tieMap = new Map();
         let currentRank = 1;
+
         scored.forEach((p, idx) => {
-            if (idx > 0 && p.average < scored[idx - 1].average) {
+            if (idx > 0 && Math.abs(p.average - scored[idx - 1].average) > 0.0001) {
                 currentRank = idx + 1;
             }
+
+            // Tie Check: Compare with prev and next
+            const isTiedWithPrev = idx > 0 && Math.abs(p.average - scored[idx - 1].average) <= 0.0001;
+            const isTiedWithNext = idx < scored.length - 1 && Math.abs(p.average - scored[idx + 1].average) <= 0.0001;
+
+            if (p.average > 0 && (isTiedWithPrev || isTiedWithNext)) {
+                tieMap.set(p.id, true);
+            }
+
             rankMap.set(p.id, p.average > 0 ? currentRank : '-');
         });
 
         return scored.map(s => ({
             ...s,
-            rank: rankMap.get(s.id)
+            rank: rankMap.get(s.id),
+            isTied: tieMap.get(s.id) || false
         }));
     }, []);
 
@@ -615,7 +627,10 @@ const AdminPanel = () => {
                                 </form>
                                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
                                     {rankedCategoryParticipants.sort((a, b) => a.number.localeCompare(b.number, undefined, { numeric: true })).map(p => (
-                                        <div key={p.id} className="p-4 bg-white/5 border border-white/10 rounded-xl flex items-center justify-between group">
+                                        <div key={p.id} className={`p-4 rounded-xl flex items-center justify-between group transition-all ${p.isTied
+                                                ? "bg-amber-500/10 border border-amber-500/30 shadow-[0_0_15px_-5px_rgba(245,158,11,0.3)]"
+                                                : "bg-white/5 border border-white/10"
+                                            }`}>
                                             {editingPId === p.id ? (
                                                 <div className="flex flex-col gap-2 w-full">
                                                     <input className="bg-black/60 border border-white/20 rounded px-2 py-1 text-white text-sm" value={editPNumber} onChange={(e) => setEditPNumber(e.target.value)} placeholder="참가번호" />
@@ -628,9 +643,15 @@ const AdminPanel = () => {
                                             ) : (
                                                 <>
                                                     <div className="flex items-center gap-3">
-                                                        <div className="w-10 h-10 rounded-lg bg-emerald-500/20 text-emerald-400 flex items-center justify-center font-black">{p.number}</div>
+                                                        <div className={`w-10 h-10 rounded-lg flex items-center justify-center font-black ${p.isTied ? "bg-amber-500/20 text-amber-500" : "bg-emerald-500/20 text-emerald-400"
+                                                            }`}>{p.number}</div>
                                                         <div>
-                                                            <span className="font-bold text-white block">{p.name}</span>
+                                                            <div className="flex items-center gap-2">
+                                                                <span className="font-bold text-white block">{p.name}</span>
+                                                                {p.isTied && (
+                                                                    <span className="text-[9px] font-black bg-amber-500 text-black px-1.5 py-0.5 rounded animate-pulse">TIE</span>
+                                                                )}
+                                                            </div>
                                                             <div className="flex items-center gap-2 mt-0.5">
                                                                 <span className="text-[10px] font-black uppercase text-slate-500">Rank</span>
                                                                 <span className="text-[10px] font-black text-indigo-400">{p.rank}</span>
@@ -694,12 +715,18 @@ const AdminPanel = () => {
                                                                 </td>
                                                             </tr>
                                                         )}
-                                                        <tr className="hover:bg-white/[0.02] transition-colors">
+                                                        <tr className={`transition-colors ${p.isTied
+                                                                ? "bg-amber-500/5 hover:bg-amber-500/10"
+                                                                : "hover:bg-white/[0.02]"
+                                                            }`}>
                                                             <td className="px-6 py-5 text-center font-black text-slate-600">{index + 1}</td>
                                                             <td className="px-6 py-5">
                                                                 <div className="flex items-center gap-3">
                                                                     <span className="font-mono text-indigo-400 font-bold bg-indigo-500/10 px-2 py-0.5 rounded text-sm">{p.number}</span>
                                                                     <span className="font-bold text-white">{p.name}</span>
+                                                                    {p.isTied && (
+                                                                        <span className="text-[9px] font-black bg-amber-500 text-black px-1.5 py-0.5 rounded animate-pulse ml-2">TIE</span>
+                                                                    )}
                                                                 </div>
                                                             </td>
                                                             <td className="px-6 py-5">

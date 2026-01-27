@@ -227,17 +227,29 @@ const Scorer = () => {
 
         // Standard Competition Ranking O(N log N)
         const rankMap = new Map();
+        const tieMap = new Map();
         let currentRank = 1;
+
         scored.forEach((p, idx) => {
-            if (idx > 0 && p.scoreForRanking < scored[idx - 1].scoreForRanking) {
+            if (idx > 0 && Math.abs(p.scoreForRanking - scored[idx - 1].scoreForRanking) > 0.0001) {
                 currentRank = idx + 1;
             }
+
+            // Tie Check
+            const isTiedWithPrev = idx > 0 && Math.abs(p.scoreForRanking - scored[idx - 1].scoreForRanking) <= 0.0001;
+            const isTiedWithNext = idx < scored.length - 1 && Math.abs(p.scoreForRanking - scored[idx + 1].scoreForRanking) <= 0.0001;
+
+            if (p.scoreForRanking > 0 && (isTiedWithPrev || isTiedWithNext)) {
+                tieMap.set(p.id, true);
+            }
+
             rankMap.set(p.id, p.scoreForRanking > 0 ? currentRank : '-');
         });
 
         return scored.map(s => ({
             ...s,
-            rank: rankMap.get(s.id)
+            rank: rankMap.get(s.id),
+            isTied: tieMap.get(s.id) || false
         }));
     }, [categoryParticipants, getParticipantTotal]);
 
@@ -464,13 +476,23 @@ const Scorer = () => {
                                                 const displayTotal = getParticipantTotal(p.id).toFixed(2);
 
                                                 return (
-                                                    <tr key={p.id} className="hover:bg-white/[0.02] transition-colors group">
-                                                        <td className="sticky left-0 z-10 bg-[#0f172a]/95 backdrop-blur-sm px-4 py-3 text-center font-black text-slate-600 text-lg shadow-[1px_0_0_rgba(255,255,255,0.05)] group-hover:bg-[#151e32]/95 transition-colors">
+                                                    <tr key={p.id} className={`transition-colors group ${p.isTied ? "bg-amber-500/10 hover:bg-amber-500/20" : "hover:bg-white/[0.02]"
+                                                        }`}>
+                                                        <td className={`sticky left-0 z-10 backdrop-blur-sm px-4 py-3 text-center font-black text-lg shadow-[1px_0_0_rgba(255,255,255,0.05)] transition-colors ${p.isTied
+                                                                ? "bg-[#1a1500]/95 text-amber-500 group-hover:bg-[#2a2000]/95"
+                                                                : "bg-[#0f172a]/95 text-slate-600 group-hover:bg-[#151e32]/95"
+                                                            }`}>
                                                             {p.number}
                                                         </td>
-                                                        <td className="sticky left-16 z-10 bg-[#0f172a]/95 backdrop-blur-sm px-4 py-3 shadow-[4px_0_10px_rgba(0,0,0,0.3)] group-hover:bg-[#151e32]/95 transition-colors text-xs">
+                                                        <td className={`sticky left-16 z-10 backdrop-blur-sm px-4 py-3 shadow-[4px_0_10px_rgba(0,0,0,0.3)] transition-colors text-xs ${p.isTied
+                                                                ? "bg-[#1a1500]/95 group-hover:bg-[#2a2000]/95"
+                                                                : "bg-[#0f172a]/95 group-hover:bg-[#151e32]/95"
+                                                            }`}>
                                                             <div className="flex items-center gap-2">
                                                                 <div className="font-bold text-white text-base truncate max-w-[150px]">{p.name}</div>
+                                                                {p.isTied && (
+                                                                    <span className="text-[9px] font-black bg-amber-500 text-black px-1.5 py-0.5 rounded animate-pulse">TIE</span>
+                                                                )}
                                                                 {((isAdmin && !isJudgeForThisComp) || (isSpectator && isLocked)) && (
                                                                     <span className="text-[12px] font-black px-2 py-0.5 rounded bg-rose-500/20 text-rose-400 border border-rose-500/30 shadow-[0_0_10px_rgba(244,63,94,0.3)]">
                                                                         R{p.rank}
@@ -574,14 +596,26 @@ const Scorer = () => {
                                         const displayTotal = getParticipantTotal(p.id).toFixed(2);
 
                                         return (
-                                            <div key={p.id} className="bg-slate-800/50 rounded-xl border border-white/10 overflow-hidden shadow-lg">
+                                            <div key={p.id} className={`rounded-xl border overflow-hidden shadow-lg ${p.isTied
+                                                    ? "bg-amber-900/10 border-amber-500/30 shadow-[0_0_15px_-5px_rgba(245,158,11,0.2)]"
+                                                    : "bg-slate-800/50 border-white/10"
+                                                }`}>
                                                 {/* Card Header */}
-                                                <div className="bg-slate-900/80 px-4 py-3 flex items-center justify-between border-b border-white/5">
+                                                <div className={`px-4 py-3 flex items-center justify-between border-b ${p.isTied
+                                                        ? "bg-amber-900/20 border-amber-500/20"
+                                                        : "bg-slate-900/80 border-white/5"
+                                                    }`}>
                                                     <div className="flex items-center gap-3">
-                                                        <div className="w-8 h-8 rounded-lg bg-indigo-500/20 flex items-center justify-center font-black text-indigo-400 text-sm border border-indigo-500/30">
+                                                        <div className={`w-8 h-8 rounded-lg flex items-center justify-center font-black text-sm border ${p.isTied
+                                                                ? "bg-amber-500/20 border-amber-500/30 text-amber-500"
+                                                                : "bg-indigo-500/20 border-indigo-500/30 text-indigo-400"
+                                                            }`}>
                                                             {p.number}
                                                         </div>
-                                                        <span className="font-bold text-white truncate max-w-[120px]">{p.name}</span>
+                                                        <span className="font-bold text-white truncate max-w-[100px]">{p.name}</span>
+                                                        {p.isTied && (
+                                                            <span className="text-[9px] font-black bg-amber-500 text-black px-1.5 py-0.5 rounded animate-pulse">TIE</span>
+                                                        )}
                                                         {((isAdmin && !isJudgeForThisComp) || (isSpectator && isLocked)) && (
                                                             <span className="text-[12px] font-black px-2 py-0.5 rounded bg-rose-500/20 text-rose-400 border border-rose-500/30 shadow-[0_0_10px_rgba(244,63,94,0.3)]">
                                                                 R{p.rank}
