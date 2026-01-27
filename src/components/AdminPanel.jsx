@@ -683,20 +683,32 @@ const AdminPanel = () => {
                                     </thead>
                                     <tbody className="divide-y divide-white/5">
                                         {compAllParticipants.length > 0 ? (
-                                            compAllParticipants.map((p, index) => (
-                                                <tr key={`${p.categoryId}_${p.id}`} className="hover:bg-white/[0.02] transition-colors">
-                                                    <td className="px-6 py-5 text-center font-black text-slate-600">{index + 1}</td>
-                                                    <td className="px-6 py-5">
-                                                        <div className="flex items-center gap-3">
-                                                            <span className="font-mono text-indigo-400 font-bold bg-indigo-500/10 px-2 py-0.5 rounded text-sm">{p.number}</span>
-                                                            <span className="font-bold text-white">{p.name}</span>
-                                                        </div>
-                                                    </td>
-                                                    <td className="px-6 py-5">
-                                                        <span className="text-xs bg-white/5 px-3 py-1.5 rounded-lg text-slate-300 font-bold uppercase tracking-tight">{p.categoryName}</span>
-                                                    </td>
-                                                </tr>
-                                            ))
+                                            compAllParticipants.map((p, index) => {
+                                                const isNewCategory = index === 0 || compAllParticipants[index - 1].categoryId !== p.categoryId;
+                                                return (
+                                                    <React.Fragment key={`${p.categoryId}_${p.id}`}>
+                                                        {isNewCategory && (
+                                                            <tr className="bg-white/5 border-y border-white/10">
+                                                                <td colSpan="3" className="px-6 py-2 text-center text-xs font-bold text-indigo-300 uppercase tracking-widest bg-indigo-500/10">
+                                                                    ◆ {p.categoryName} ◆
+                                                                </td>
+                                                            </tr>
+                                                        )}
+                                                        <tr className="hover:bg-white/[0.02] transition-colors">
+                                                            <td className="px-6 py-5 text-center font-black text-slate-600">{index + 1}</td>
+                                                            <td className="px-6 py-5">
+                                                                <div className="flex items-center gap-3">
+                                                                    <span className="font-mono text-indigo-400 font-bold bg-indigo-500/10 px-2 py-0.5 rounded text-sm">{p.number}</span>
+                                                                    <span className="font-bold text-white">{p.name}</span>
+                                                                </div>
+                                                            </td>
+                                                            <td className="px-6 py-5">
+                                                                <span className="text-xs bg-white/5 px-3 py-1.5 rounded-lg text-slate-300 font-bold uppercase tracking-tight">{p.categoryName}</span>
+                                                            </td>
+                                                        </tr>
+                                                    </React.Fragment>
+                                                );
+                                            })
                                         ) : (
                                             <tr>
                                                 <td colSpan="3" className="px-6 py-10 text-center text-slate-500">참가자가 없습니다.</td>

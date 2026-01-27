@@ -78,8 +78,16 @@ const useStore = create((set, get) => ({
             unsubParticipants: null,
             unsubJudges: null,
             currentSyncedCompId: null,
-            currentSyncedCatId: null
+            currentSyncedCatId: null,
+
+            // Reset Navigation to Default
+            activeView: null,
+            selectedCategoryId: '',
+            adminTab: 'scoring'
         });
+
+        // Also clear history state to prevent back-button confusion
+        window.history.replaceState(null, '', window.location.pathname);
     },
 
     // 사용자 역할(Role) 동기화 및 권한 부여
