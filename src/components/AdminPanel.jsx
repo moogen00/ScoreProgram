@@ -53,6 +53,8 @@ const AdminPanel = () => {
     const [editingPId, setEditingPId] = useState(null);
     const [editPNumber, setEditPNumber] = useState('');
     const [editPName, setEditPName] = useState('');
+    const [editPRank, setEditPRank] = useState(''); // DB Rank
+    const [editPRankFixed, setEditPRankFixed] = useState(false);
 
     // 참가자 일괄 관리 상태 (정렬, 복구 등)
     const [sortConfig, setSortConfig] = useState({ field: 'no', direction: 'asc' });
@@ -168,15 +170,13 @@ const AdminPanel = () => {
     };
 
     // 참가자 정보 수정 검증 및 업데이트
-    const validateAndUpdateParticipant = (categoryId, pId, newNumber, newName) => {
+    const validateAndUpdateParticipant = (categoryId, pId, newNumber, newName, newRank, newRankFixed) => {
         const number = newNumber.trim();
         const name = newName.trim();
 
         if (!name) return;
 
         const currentList = participants[categoryId] || [];
-        // Only check duplicate if number is provided and different from current (though current check handles pId check)
-        // If number is empty, we allow it even if others are empty (or maybe we don't care about duplicate empty numbers)
         const isDuplicate = number && currentList.some(p => p.number === number && p.id !== pId);
 
         if (isDuplicate) {
@@ -184,7 +184,29 @@ const AdminPanel = () => {
             return;
         }
 
-        updateParticipant(categoryId, pId, { number, name });
+        // newRank comes from input string
+        const updateData = { number, name };
+
+        // Handle Rank Logic
+        if (newRankFixed) {
+            if (newRank) {
+                updateData.rank = parseInt(newRank, 10);
+                updateData.rankFixed = true;
+            } else {
+                // User clicked "Fixed" but cleared input? Treat as Unfixed/Auto
+                updateData.rankFixed = false;
+            }
+        } else {
+            // User Explicitly clicked "Auto" or unchecked fixed (if we had checkbox)
+            // But here we might just pass explicit fixed flag
+            updateData.rankFixed = false;
+            // We don't set rank here, Auto-Sync will handle it. 
+            // OR we can clear it to null to signal reset?
+            // Let's set rank: null so auto-calc fills it.
+            updateData.rank = null;
+        }
+
+        updateParticipant(categoryId, pId, updateData);
         setEditingPId(null);
     };
 
@@ -253,51 +275,125 @@ const AdminPanel = () => {
         removeParticipant(categoryId, pId);
     };
 
-    // 참가자별 점수 합계 및 평균 계산 (랭킹 산정용) - 동점자 체크 추가
-    const getScoredParticipants = useCallback((ps, catScores) => {
+    // Score Calculation Helper (Pure, no DB rank logic here usually, but we need to list for sorting)
+    // Actually, we use this to Generate the Auto-Ranks.
+    const calculateStatsOnly = useCallback((ps, catScores) => {
         if (!ps || ps.length === 0) return [];
 
-        const scored = ps.map(p => {
+        return ps.map(p => {
             const pScores = catScores[p.id] || {};
             const judgeEmails = Object.keys(pScores);
             const judgeCount = judgeEmails.length;
-
             const totalSum = judgeEmails.reduce((sum, email) => {
                 const itemScores = pScores[email] || {};
                 const judgeSum = Object.values(itemScores).reduce((a, b) => a + b, 0);
                 return sum + judgeSum;
             }, 0);
-
             const average = judgeCount > 0 ? totalSum / judgeCount : 0;
             return { ...p, totalSum, average, judgeCount };
-        }).sort((a, b) => b.average - a.average);
+        });
+    }, []);
 
-        const rankMap = new Map();
-        const tieMap = new Map();
+    // -------------------------------------------------------------------------
+    // AUTO-RANK SYNC LOGIC
+    // -------------------------------------------------------------------------
+    // This effect runs whenever scores or participants change.
+    // It calculates the theoretical scores, determines ranks, and UPDATES DB if needed.
+    // This ensures DB always has the "current correct rank" unless Fixed.
+    useEffect(() => {
+        if (!manageCatId || !scores[manageCatId] || !participants[manageCatId]) return;
+
+        const ps = participants[manageCatId];
+        const catScores = scores[manageCatId];
+
+        // 1. Calculate Scores
+        const scored = calculateStatsOnly(ps, catScores);
+
+        // 2. Sort by Average Descending (to determine Auto Rank)
+        scored.sort((a, b) => b.average - a.average);
+
+        // 3. Determine Ranks (Standard Competition Ranking with Ties)
+        // Tie Logic:
+        // Rank 1 (10.0), Rank 1 (10.0), Rank 3 (9.0)...
+        const newRanks = new Map(); // p.id -> rank (number)
+
         let currentRank = 1;
-
         scored.forEach((p, idx) => {
+            // If idx > 0 and score < prev score, update currentRank
             if (idx > 0 && Math.abs(p.average - scored[idx - 1].average) > 0.0001) {
                 currentRank = idx + 1;
             }
-
-            // Tie Check: Compare with prev and next
-            const isTiedWithPrev = idx > 0 && Math.abs(p.average - scored[idx - 1].average) <= 0.0001;
-            const isTiedWithNext = idx < scored.length - 1 && Math.abs(p.average - scored[idx + 1].average) <= 0.0001;
-
-            if (p.average > 0 && (isTiedWithPrev || isTiedWithNext)) {
-                tieMap.set(p.id, true);
-            }
-
-            rankMap.set(p.id, p.average > 0 ? currentRank : '-');
+            // If score is 0, maybe no rank? 
+            // Existing logic: "p.average > 0 ? currentRank : '-'"
+            // Let's store NULL if no score aka 0.
+            newRanks.set(p.id, p.average > 0 ? currentRank : null);
         });
 
-        return scored.map(s => ({
-            ...s,
-            rank: rankMap.get(s.id),
-            isTied: tieMap.get(s.id) || false
+        // 4. Batch Update Diff
+        // For each participant, if !rankFixed, check if DB rank matches newRank.
+        scored.forEach(p => {
+            if (p.rankFixed) return; // Skip manual override
+
+            const calculatedRank = newRanks.get(p.id);
+            // Check if different (handle nulls)
+            if (p.rank !== calculatedRank) {
+                // Trigger Update
+                // We use updateParticipant. 
+                // WARNING: Calling this inside loop/effect might cause spam if not careful.
+                // But Firestore updates will trigger listener -> participants update -> effect runs.
+                // If p.rank == calculatedRank, no update -> stable.
+                // Optimization: Maybe we should debounce this? 
+                // But usually standard loop is fine as it stabilizes in one pass.
+                console.log(`[Auto-Rank] Updating ${p.name}: ${p.rank} -> ${calculatedRank}`);
+                updateParticipant(manageCatId, p.id, { rank: calculatedRank });
+            }
+        });
+
+    }, [manageCatId, scores, participants, calculateStatsOnly, updateParticipant]);
+
+    // -------------------------------------------------------------------------
+    // DISPLAY LIST GENERATION
+    // -------------------------------------------------------------------------
+    const getScoredParticipants = useCallback((ps, catScores) => {
+        // Just calculate stats for display. Rank comes from DB (passed in 'ps')
+        const withStats = calculateStatsOnly(ps, catScores);
+
+        // Sort for Display: 
+        // Primary: Rank (Asc) - (Nulls last)
+        // Secondary: Score (Desc)
+        return withStats.sort((a, b) => {
+            const rA = a.rank ?? 999999;
+            const rB = b.rank ?? 999999;
+            if (rA !== rB) return rA - rB;
+            return b.average - a.average;
+        }).map(p => {
+            // Determine "Tie" for display badge
+            // If DB ranks are equal, it's a tie. 
+            // We need to look at neighbors in the *sorted* list?
+            // Actually, we can just check if anyone else has same rank. But efficient way?
+            // Post-sort map check?
+            return p;
+        });
+
+    }, [calculateStatsOnly]);
+
+    // Add Tie Detection to the final mapped array
+    const scoredParticipantsWithTies = useMemo(() => {
+        const list = getScoredParticipants(participants[manageCatId], scores[manageCatId] || {});
+
+        // Mark Ties
+        const rankCounts = {};
+        list.forEach(p => {
+            if (p.rank) {
+                rankCounts[p.rank] = (rankCounts[p.rank] || 0) + 1;
+            }
+        });
+
+        return list.map(p => ({
+            ...p,
+            isTied: p.rank && rankCounts[p.rank] > 1
         }));
-    }, []);
+    }, [getScoredParticipants, participants, manageCatId, scores]);
 
     // 현재 관리 중인 종목의 참가자 랭킹 목록 계산
     const rankedCategoryParticipants = useMemo(() => {
@@ -626,18 +722,48 @@ const AdminPanel = () => {
                                     <button type="submit" className="bg-emerald-600 hover:bg-emerald-500 text-white py-3 rounded-xl font-bold flex items-center justify-center gap-2 transition-all hover:scale-[1.02]"><UserPlus size={20} /> 참가자 등록</button>
                                 </form>
                                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-                                    {rankedCategoryParticipants.sort((a, b) => a.number.localeCompare(b.number, undefined, { numeric: true })).map(p => (
+                                    {scoredParticipantsWithTies.sort((a, b) => a.number.localeCompare(b.number, undefined, { numeric: true })).map(p => (
                                         <div key={p.id} className={`p-4 rounded-xl flex items-center justify-between group transition-all ${p.isTied
-                                                ? "bg-amber-500/10 border border-amber-500/30 shadow-[0_0_15px_-5px_rgba(245,158,11,0.3)]"
-                                                : "bg-white/5 border border-white/10"
+                                            ? "bg-amber-500/10 border border-amber-500/30 shadow-[0_0_15px_-5px_rgba(245,158,11,0.3)]"
+                                            : "bg-white/5 border border-white/10"
                                             }`}>
                                             {editingPId === p.id ? (
                                                 <div className="flex flex-col gap-2 w-full">
-                                                    <input className="bg-black/60 border border-white/20 rounded px-2 py-1 text-white text-sm" value={editPNumber} onChange={(e) => setEditPNumber(e.target.value)} placeholder="참가번호" />
-                                                    <input className="bg-black/60 border border-white/20 rounded px-2 py-1 text-white text-sm" value={editPName} onChange={(e) => setEditPName(e.target.value)} placeholder="이름" />
                                                     <div className="flex gap-2">
-                                                        <button onClick={() => validateAndUpdateParticipant(manageCatId, p.id, editPNumber, editPName)} className="text-[10px] bg-emerald-600 px-3 py-1 rounded font-bold">저장</button>
-                                                        <button onClick={() => setEditingPId(null)} className="text-[10px] bg-slate-600 px-3 py-1 rounded font-bold">취소</button>
+                                                        <input className="bg-black/60 border border-white/20 rounded px-2 py-1 text-white text-sm w-16" value={editPNumber} onChange={(e) => setEditPNumber(e.target.value)} placeholder="번호" />
+                                                        <input className="bg-black/60 border border-white/20 rounded px-2 py-1 text-white text-sm flex-1" value={editPName} onChange={(e) => setEditPName(e.target.value)} placeholder="이름" />
+                                                    </div>
+                                                    <div className="flex items-center gap-2">
+                                                        <span className="text-[10px] text-slate-400 uppercase font-black w-8">Rank:</span>
+                                                        <input
+                                                            className={cn(
+                                                                "border rounded px-2 py-1 text-white text-xs w-16 transition-colors",
+                                                                editPRankFixed ? "bg-amber-500/20 border-amber-500/50 text-amber-300" : "bg-black/60 border-white/20"
+                                                            )}
+                                                            value={editPRank}
+                                                            onChange={(e) => {
+                                                                setEditPRank(e.target.value);
+                                                                setEditPRankFixed(true); // Typing fixes it
+                                                            }}
+                                                            placeholder="Auto"
+                                                            type="number"
+                                                        />
+                                                        <button
+                                                            onClick={() => {
+                                                                setEditPRank('');
+                                                                setEditPRankFixed(false);
+                                                            }}
+                                                            className={cn(
+                                                                "text-[10px] px-2 py-1 rounded font-bold transition-all border",
+                                                                !editPRankFixed ? "bg-emerald-500 text-black border-emerald-500" : "bg-transparent text-slate-400 border-white/10 hover:bg-white/5"
+                                                            )}
+                                                        >
+                                                            Auto
+                                                        </button>
+                                                    </div>
+                                                    <div className="flex gap-2 mt-1">
+                                                        <button onClick={() => validateAndUpdateParticipant(manageCatId, p.id, editPNumber, editPName, editPRank, editPRankFixed)} className="text-[10px] bg-emerald-600 px-3 py-1 rounded font-bold hover:bg-emerald-500">저장</button>
+                                                        <button onClick={() => setEditingPId(null)} className="text-[10px] bg-slate-600 px-3 py-1 rounded font-bold hover:bg-slate-500">취소</button>
                                                     </div>
                                                 </div>
                                             ) : (
@@ -661,7 +787,13 @@ const AdminPanel = () => {
                                                         </div>
                                                     </div>
                                                     <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-all">
-                                                        <button onClick={() => { setEditingPId(p.id); setEditPNumber(p.number); setEditPName(p.name); }} className="p-2 hover:bg-white/10 rounded-lg text-slate-400"><Settings size={14} /></button>
+                                                        <button onClick={() => {
+                                                            setEditingPId(p.id);
+                                                            setEditPNumber(p.number);
+                                                            setEditPName(p.name);
+                                                            setEditPRank(p.rank || '');
+                                                            setEditPRankFixed(p.rankFixed || false);
+                                                        }} className="p-2 hover:bg-white/10 rounded-lg text-slate-400"><Settings size={14} /></button>
                                                         <button onClick={() => handleDeleteParticipant(manageCatId, p.id)} className="p-2 hover:bg-rose-500/20 rounded-lg text-rose-400"><Trash2 size={16} /></button>
                                                     </div>
                                                 </>
@@ -716,8 +848,8 @@ const AdminPanel = () => {
                                                             </tr>
                                                         )}
                                                         <tr className={`transition-colors ${p.isTied
-                                                                ? "bg-amber-500/5 hover:bg-amber-500/10"
-                                                                : "hover:bg-white/[0.02]"
+                                                            ? "bg-amber-500/5 hover:bg-amber-500/10"
+                                                            : "hover:bg-white/[0.02]"
                                                             }`}>
                                                             <td className="px-6 py-5 text-center font-black text-slate-600">{index + 1}</td>
                                                             <td className="px-6 py-5">

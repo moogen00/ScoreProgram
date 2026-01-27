@@ -830,9 +830,33 @@ const useStore = create((set, get) => ({
             genre,
             category,
             number,
+            category,
+            number,
             name,
+            rank: null,      // DB-based Rank (Source of Truth)
+            rankFixed: false, // If true, Auto-Calc will not overwrite this rank
             createdAt: new Date().toISOString()
         });
+    },
+
+    // 참가자 정보 수정 (이름, 번호, 순위 등)
+    updateParticipant: async (categoryId, participantId, updates) => {
+        const docRef = doc(db, 'participants', `${categoryId}_${participantId}`);
+        const safeUpdates = { ...updates };
+
+        // Ensure rank is handled correctly if present
+        // (We don't need special parsing if we trust the input, but let's be safe if it comes from UI text input)
+        if (safeUpdates.rank !== undefined) {
+            if (safeUpdates.rank === '' || safeUpdates.rank === null) {
+                safeUpdates.rank = null;
+            } else {
+                // Try to keep it as number if possible, or string if user really wants string?
+                // Plan said Number.
+                safeUpdates.rank = parseInt(safeUpdates.rank, 10);
+            }
+        }
+
+        await updateDoc(docRef, safeUpdates);
     },
 
     // 특정 대회의 모든 참가자 가져오기

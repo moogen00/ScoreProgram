@@ -53,21 +53,27 @@ const Leaderboard = () => {
             // 평균 계산
             const average = judgeCount > 0 ? totalSum / judgeCount : 0;
             return { ...p, totalSum, average, judgeCount, judgeBreakdown, pScores };
-        }).sort((a, b) => b.average - a.average); // 평균 점수 내림차순 정렬
-
-        // 순위 계산 (동점자 처리 로직 포함)
-        const rankMap = new Map();
-        let currentRank = 1;
-        scored.forEach((d, idx) => {
-            if (idx > 0 && d.average < scored[idx - 1].average) {
-                currentRank = idx + 1;
+        }).sort((a, b) => { // DB Rank 우선 정렬
+            // 1. DB Rank Priority (Ascending, Nulls last)
+            if (a.rank !== null && a.rank !== undefined && b.rank !== null && b.rank !== undefined) {
+                return a.rank - b.rank;
             }
-            rankMap.set(d.id, d.average > 0 ? currentRank : '-');
+            if (a.rank !== null && a.rank !== undefined) return -1;
+            if (b.rank !== null && b.rank !== undefined) return 1;
+
+            // 2. Score Priority (Descending)
+            return b.average - a.average;
         });
+
+        // 순위 계산 (DB 기준)
+        // We just attach the DB rank to the object for display convenience if not already there,
+        // but actually we can just map it.
+        // Also handle "TIE" detection via duplicate ranks in DB? 
+        // Tie logic is handled by "Auto-Calc" in AdminPanel, so DB has same ranks for tigers.
 
         return scored.map(d => ({
             ...d,
-            rank: rankMap.get(d.id)
+            rank: d.rank || '-' // Use DB rank
         }));
     }, [categoryParticipants, categoryScores, judgeMap]);
 

@@ -216,40 +216,42 @@ const Scorer = () => {
     // 채점 항목 정렬 (Order 기준)
     const sortedItems = [...scoringItems].sort((a, b) => a.order - b.order);
 
-    // 참가자 랭킹 계산 (평균 점수 기준 내림차순 정렬)
+    // 참가자 랭킹 계산 (DB Rank 우선 정렬)
     const rankedParticipants = useMemo(() => {
         if (categoryParticipants.length === 0) return [];
 
         const scored = categoryParticipants.map(p => {
             const total = getParticipantTotal(p.id);
             return { ...p, scoreForRanking: total };
-        }).sort((a, b) => b.scoreForRanking - a.scoreForRanking);
-
-        // Standard Competition Ranking O(N log N)
-        const rankMap = new Map();
-        const tieMap = new Map();
-        let currentRank = 1;
-
-        scored.forEach((p, idx) => {
-            if (idx > 0 && Math.abs(p.scoreForRanking - scored[idx - 1].scoreForRanking) > 0.0001) {
-                currentRank = idx + 1;
+        }).sort((a, b) => {
+            // 1. DB Rank Priority (Ascending, Nulls last)
+            // If both have rank
+            if (a.rank !== null && a.rank !== undefined && b.rank !== null && b.rank !== undefined) {
+                return a.rank - b.rank;
             }
+            // If only a has rank, comes first
+            if (a.rank !== null && a.rank !== undefined) return -1;
+            if (b.rank !== null && b.rank !== undefined) return 1;
 
-            // Tie Check
-            const isTiedWithPrev = idx > 0 && Math.abs(p.scoreForRanking - scored[idx - 1].scoreForRanking) <= 0.0001;
-            const isTiedWithNext = idx < scored.length - 1 && Math.abs(p.scoreForRanking - scored[idx + 1].scoreForRanking) <= 0.0001;
-
-            if (p.scoreForRanking > 0 && (isTiedWithPrev || isTiedWithNext)) {
-                tieMap.set(p.id, true);
-            }
-
-            rankMap.set(p.id, p.scoreForRanking > 0 ? currentRank : '-');
+            // 2. Score Priority (Descending) for unranked
+            return b.scoreForRanking - a.scoreForRanking;
         });
+
+        // Determine Ties based on DB Rank
+        // If multiple people have SAME Rank (and rank is not null), they are tied.
+        const rankCounts = {};
+        scored.forEach(p => {
+            if (p.rank) {
+                rankCounts[p.rank] = (rankCounts[p.rank] || 0) + 1;
+            }
+        });
+
+        // We do NOT recalculate ranks here. We trust the DB.
 
         return scored.map(s => ({
             ...s,
-            rank: rankMap.get(s.id),
-            isTied: tieMap.get(s.id) || false
+            rank: s.rank || '-', // Display DB rank or dash
+            isTied: s.rank && rankCounts[s.rank] > 1
         }));
     }, [categoryParticipants, getParticipantTotal]);
 
@@ -479,14 +481,14 @@ const Scorer = () => {
                                                     <tr key={p.id} className={`transition-colors group ${p.isTied ? "bg-amber-500/10 hover:bg-amber-500/20" : "hover:bg-white/[0.02]"
                                                         }`}>
                                                         <td className={`sticky left-0 z-10 backdrop-blur-sm px-4 py-3 text-center font-black text-lg shadow-[1px_0_0_rgba(255,255,255,0.05)] transition-colors ${p.isTied
-                                                                ? "bg-[#1a1500]/95 text-amber-500 group-hover:bg-[#2a2000]/95"
-                                                                : "bg-[#0f172a]/95 text-slate-600 group-hover:bg-[#151e32]/95"
+                                                            ? "bg-[#1a1500]/95 text-amber-500 group-hover:bg-[#2a2000]/95"
+                                                            : "bg-[#0f172a]/95 text-slate-600 group-hover:bg-[#151e32]/95"
                                                             }`}>
                                                             {p.number}
                                                         </td>
                                                         <td className={`sticky left-16 z-10 backdrop-blur-sm px-4 py-3 shadow-[4px_0_10px_rgba(0,0,0,0.3)] transition-colors text-xs ${p.isTied
-                                                                ? "bg-[#1a1500]/95 group-hover:bg-[#2a2000]/95"
-                                                                : "bg-[#0f172a]/95 group-hover:bg-[#151e32]/95"
+                                                            ? "bg-[#1a1500]/95 group-hover:bg-[#2a2000]/95"
+                                                            : "bg-[#0f172a]/95 group-hover:bg-[#151e32]/95"
                                                             }`}>
                                                             <div className="flex items-center gap-2">
                                                                 <div className="font-bold text-white text-base truncate max-w-[150px]">{p.name}</div>
@@ -597,18 +599,18 @@ const Scorer = () => {
 
                                         return (
                                             <div key={p.id} className={`rounded-xl border overflow-hidden shadow-lg ${p.isTied
-                                                    ? "bg-amber-900/10 border-amber-500/30 shadow-[0_0_15px_-5px_rgba(245,158,11,0.2)]"
-                                                    : "bg-slate-800/50 border-white/10"
+                                                ? "bg-amber-900/10 border-amber-500/30 shadow-[0_0_15px_-5px_rgba(245,158,11,0.2)]"
+                                                : "bg-slate-800/50 border-white/10"
                                                 }`}>
                                                 {/* Card Header */}
                                                 <div className={`px-4 py-3 flex items-center justify-between border-b ${p.isTied
-                                                        ? "bg-amber-900/20 border-amber-500/20"
-                                                        : "bg-slate-900/80 border-white/5"
+                                                    ? "bg-amber-900/20 border-amber-500/20"
+                                                    : "bg-slate-900/80 border-white/5"
                                                     }`}>
                                                     <div className="flex items-center gap-3">
                                                         <div className={`w-8 h-8 rounded-lg flex items-center justify-center font-black text-sm border ${p.isTied
-                                                                ? "bg-amber-500/20 border-amber-500/30 text-amber-500"
-                                                                : "bg-indigo-500/20 border-indigo-500/30 text-indigo-400"
+                                                            ? "bg-amber-500/20 border-amber-500/30 text-amber-500"
+                                                            : "bg-indigo-500/20 border-indigo-500/30 text-indigo-400"
                                                             }`}>
                                                             {p.number}
                                                         </div>
