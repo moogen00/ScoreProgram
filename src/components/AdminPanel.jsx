@@ -23,7 +23,8 @@ const AdminPanel = () => {
         adminTab, setAdminTab,
         isResetting, resetStatus, isExporting,
         addCompetition, updateCompetition, deleteCompetition,
-        toggleCategoryLock
+        toggleCategoryLock,
+        admins, addAdmin, removeAdmin
     } = useStore();
 
     // 폼 입력 상태 (새로운 데이터 추가용)
@@ -824,10 +825,8 @@ const AdminPanel = () => {
                                                                 )}
                                                             </div>
                                                             <div className="flex items-center gap-2 mt-0.5">
-                                                                <span className="text-[10px] font-black uppercase text-slate-500">Rank</span>
-                                                                <span className="text-[10px] font-black text-indigo-400">{p.rank}</span>
-                                                                <span className="text-[10px] font-black uppercase text-slate-500 ml-1">Avg</span>
-                                                                <span className="text-[10px] font-black text-emerald-400">{p.average?.toFixed(2) || '0.00'}</span>
+                                                                <span className="text-xs font-black uppercase text-slate-500">Rank</span>
+                                                                <span className="text-lg font-black text-rose-400">{p.rank || '-'}</span>
                                                             </div>
                                                         </div>
                                                     </div>
@@ -1305,11 +1304,13 @@ const AdminPanel = () => {
                                         <div className="w-10 h-10 rounded-xl bg-rose-500/20 text-rose-400 flex items-center justify-center"><Shield size={20} /></div>
                                         <div><p className="font-bold text-white">{admin.name}</p><p className="text-xs text-slate-500">{admin.email}</p></div>
                                     </div>
-                                    <button onClick={() => {
-                                        if (confirm(`${admin.name} 관리자를 정말 삭제하시겠습니까?`)) {
-                                            removeAdmin(admin.email);
-                                        }
-                                    }} className="p-2 opacity-0 group-hover:opacity-100 hover:bg-rose-500/20 rounded-lg text-rose-400 transition-all"><Trash2 size={18} /></button>
+                                    {admin.email !== 'moogen00@gmail.com' && (
+                                        <button onClick={() => {
+                                            if (confirm(`${admin.name} 관리자를 정말 삭제하시겠습니까?`)) {
+                                                removeAdmin(admin.email);
+                                            }
+                                        }} className="p-2 opacity-0 group-hover:opacity-100 hover:bg-rose-500/20 rounded-lg text-rose-400 transition-all"><Trash2 size={18} /></button>
+                                    )}
                                 </div>
                             ))}
                         </div>
