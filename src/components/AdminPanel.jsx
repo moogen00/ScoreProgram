@@ -189,7 +189,8 @@ const AdminPanel = () => {
             // Rank Update Logic with Auto-Reordering (Dense Ranking)
             // If Fixing Rank (Manual Override)
             if (newRankFixed && newRank) {
-                const targetRank = parseInt(newRank, 10);
+                let targetRank = parseInt(newRank, 10);
+                if (targetRank < 1) targetRank = 1; // Prevent negative/zero rank
 
                 // 1. Create a mutable copy and apply the target change tentatively
                 // If other participants have no rank, we push them to the end (9999)
@@ -793,6 +794,7 @@ const AdminPanel = () => {
                                                             }}
                                                             placeholder="Auto"
                                                             type="number"
+                                                            min="1"
                                                         />
                                                         <button
                                                             onClick={() => {
