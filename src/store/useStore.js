@@ -1299,12 +1299,21 @@ const useStore = create((set, get) => ({
 
             await settingsBatch.commit();
 
-            set({ resetStatus: '데이터 정제 완료' });
-            // Removed: await get().initDefaults(); - No longer creating default years/categories
+            // Clear local state immediately to prevent sync logic from using stale data
+            set({
+                competitions: [],
+                judgesByComp: {},
+                participants: {},
+                scores: {},
+                activeView: null,
+                selectedCategoryId: ''
+            });
 
+            set({ resetStatus: '데이터 정제 완료' });
             console.log('[Store] Full Database Reset complete.');
             set({ resetStatus: '완료!' });
-            alert('데이터베이스가 성공적으로 초기화되었습니다.');
+            alert('데이터베이스가 성공적으로 초기화되었습니다. 안전한 데이터 갱신을 위해 페이지가 새로고침됩니다.');
+            window.location.reload(); // Force reload for a clean slate
         } catch (error) {
             console.error('[Store] clearAllData failed:', error);
             alert('초기화 중 오류가 발생했습니다: ' + error.message);
