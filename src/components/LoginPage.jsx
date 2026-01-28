@@ -4,7 +4,8 @@ import { jwtDecode } from 'jwt-decode';
 import { signInAnonymously, GoogleAuthProvider, signInWithCredential } from 'firebase/auth';
 
 import useStore from '../store/useStore';
-import { auth } from '../lib/firebase';
+import { collection, query, where, getDocs } from 'firebase/firestore';
+import { db, auth } from '../lib/firebase';
 import { Trophy, LogIn, Users } from 'lucide-react';
 import { motion } from 'framer-motion';
 
@@ -17,18 +18,27 @@ const LoginPage = () => {
             const decoded = jwtDecode(credentialResponse.credential);
             const email = decoded.email.toLowerCase(); // Force lowercase
 
-            // Check permissions
+            // 1. Firebase Authentication Bridge First
+            // We need this so Firestore rules allow us to check the user's records.
+            const credential = GoogleAuthProvider.credential(credentialResponse.credential);
+            await signInWithCredential(auth, credential);
+
+            // 2. Check permissions
             const rootAdmins = (import.meta.env.VITE_ROOT_ADMIN_EMAILS || '').split(',').map(e => e.trim());
             const isRootAdmin = rootAdmins.includes(email);
             const isAdmin = isRootAdmin || Object.values(admins || {}).some(a => a.email === email);
-            const isJudge = Object.values(judgesByComp || {}).some(compJudges => compJudges.some(j => j.email === email));
+
+            // For Judges, we perform a direct Firestore query because the local judgesByComp
+            // state is only populated AFTER the full login action completes.
+            const q = query(collection(db, 'judges'), where('email', '==', email));
+            const judgeSnap = await getDocs(q);
+            const isJudge = !judgeSnap.empty;
 
             // Debugging Alert
-            console.log('Login Debug:', { email, isJudge, isAdmin, judgesByComp, PROD: import.meta.env.PROD });
+            console.log('Login Debug:', { email, isJudge, isAdmin, PROD: import.meta.env.PROD });
 
-            // Strict Check: Enforce strictly in Production, allow loose access in Dev
+            // Strict Check: Enforce strictly in Production
             if (import.meta.env.PROD && !isAdmin && !isJudge) {
-                const registeredJudges = Object.values(judgesByComp || {}).flat().map(j => `[${j.email}](${j.email.length})`);
                 const registeredAdmins = (admins || []).map(a => `[${a.email}](${a.email.length})`);
 
                 let debugMsg = `[로그인 권한 진단]\n\n`;
@@ -37,15 +47,14 @@ const LoginPage = () => {
                 debugMsg += `일반 Admin 여부: ${isAdmin ? 'YES' : 'NO'}\n`;
                 debugMsg += `심사위원 여부: ${isJudge ? 'YES' : 'NO'}\n\n`;
                 debugMsg += `등록된 Admins: ${registeredAdmins.join(', ') || '없음'}\n`;
-                debugMsg += `등록된 Judges: ${registeredJudges.join(', ') || '없음'}\n\n`;
+                debugMsg += `등록된 Judges: (Direct DB Check: ${isJudge ? 'FOUND' : 'NOT_FOUND'})\n\n`;
                 debugMsg += `※ 이메일 대소문자나 뒤에 공백이 있는지 확인해주세요.`;
 
                 alert(debugMsg);
+                // Sign out of Firebase since the user is NOT registered in our app's judges/admins
+                await auth.signOut();
                 return;
             }
-            // Firebase Authentication Bridge
-            const credential = GoogleAuthProvider.credential(credentialResponse.credential);
-            await signInWithCredential(auth, credential);
 
             login({
                 email: decoded.email,
