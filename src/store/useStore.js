@@ -635,7 +635,6 @@ const useStore = create((set, get) => ({
     },
 
     // 대회 잠금/해제 토글 (하위 모든 종목 잠금 상태 동기화)
-    // 대회 잠금/해제 토글 (하위 모든 종목 잠금 상태 동기화 + 랭킹 확정)
     toggleCompetitionLock: async (compId, isLocked) => {
         const compRef = doc(db, 'competitions', compId);
         const compSnap = await getDoc(compRef);
@@ -648,100 +647,13 @@ const useStore = create((set, get) => ({
                 locked: isLocked
             }));
 
-            // Batch process for atomicity
-            const batch = writeBatch(db);
-
-            // 1. Update Competition
-            batch.update(compRef, {
+            // Sync to database
+            await updateDoc(compRef, {
                 locked: isLocked,
                 categories: updatedCategories
             });
-
-            // 2. If Locking, process ranks for all categories
-            if (isLocked) {
-                for (const cat of (data.categories || [])) {
-                    // Fetch Participants and Scores for this category
-                    const pQuery = query(collection(db, 'participants'), where('categoryId', '==', cat.id));
-                    const sQuery = query(collection(db, 'scores'), where('categoryId', '==', cat.id));
-
-                    const [pSnap, sSnap] = await Promise.all([getDocs(pQuery), getDocs(sQuery)]);
-
-                    // Group scores by participant
-                    const pScores = {}; // pId -> totalScore
-                    sSnap.docs.forEach(doc => {
-                        const s = doc.data();
-                        const pId = s.participantId;
-                        // Calculate total for this score entry (sum of all items)
-                        const total = Object.values(s.values || {}).reduce((sum, v) => sum + (parseFloat(v) || 0), 0);
-                        // If multiple judges, we average them? 
-                        // Current Scorer logic: Admin/Spectator view averages all judges.
-                        // Let's replicate strict logic: 
-                        // We need to group purely by participant first to average across judges.
-                        // Actually, simpler approach: Just sum ALL scores for ALL judges for that participant? 
-                        // No, standards usually are Average of Judges. 
-                        // Let's grab the logic from Scorer -> getParticipantTotal logic roughly.
-                        // But Scorer uses 'scores' state. Here we have raw docs.
-
-                        if (!pScores[pId]) pScores[pId] = [];
-                        pScores[pId].push(total);
-                    });
-
-                    const participantsData = pSnap.docs.map(d => {
-                        const p = d.data();
-                        const id = p.id || d.id.split('_').pop();
-                        // Calculate Score
-                        const totals = pScores[id] || [];
-                        let finalScore = 0;
-                        if (totals.length > 0) {
-                            const sumTotal = totals.reduce((a, b) => a + b, 0);
-                            finalScore = parseFloat((sumTotal / totals.length).toFixed(2));
-                        }
-                        return { ...p, _ref: d.ref, _score: finalScore };
-                    });
-
-                    // Sort by Score Descencing
-                    participantsData.sort((a, b) => b._score - a._score);
-
-                    // Determine Ranks
-                    let currentRank = 1;
-                    participantsData.forEach((p, idx) => {
-                        if (idx > 0 && Math.abs(p._score - participantsData[idx - 1]._score) > 0.001) {
-                            currentRank = idx + 1;
-                        }
-                        p._calculatedRank = p._score > 0 ? currentRank : null;
-                    });
-
-                    // Update Batch
-                    participantsData.forEach(p => {
-                        const updates = { rankFixed: true };
-                        // Only set rank if it's currently null/undefined. 
-                        // If Admin already manually set a rank, respect it.
-                        if (p.rank === null || p.rank === undefined) {
-                            if (p._calculatedRank !== null) {
-                                updates.rank = p._calculatedRank;
-                            }
-                        }
-                        batch.update(p._ref, updates);
-                    });
-                }
-            } else {
-                // Unlocking: Optional - do we unlock rankFixed? 
-                // User requirement: "rankFixed = true" implies manual intervention or finalization.
-                // Usually Unlocking Competition allows editing again.
-                // Should we set rankFixed = false? 
-                // PREVIOUS LOGIC: Only sets rankFixed=true on lock. Does NOT revert on unlock.
-                // This preserves manual overrides. We stick to this unless requested.
-            }
-
-            await batch.commit();
         }
     },
-
-    // 종목 잠금/해제 토글
-    toggleCategoryLock: async (compId, categoryId, isLocked) => { // Removed duplicate declaration
-        // ... (Logic removed from here as we are replacing the block) ...
-    },
-    // We need to correct the replacement to cover the range.
 
     // 종목 잠금/해제 개별 토글
     toggleCategoryLock: async (compId, categoryId, isLocked) => {
@@ -751,66 +663,12 @@ const useStore = create((set, get) => ({
             const categories = (compSnap.data().categories || []).map(c =>
                 c.id === categoryId ? { ...c, locked: isLocked } : c
             );
-
-            const batch = writeBatch(db);
-
-            // 1. Update Competition (Categories array)
-            batch.update(compRef, { categories });
-
-            // 2. If Locking, process ranks for this category
-            if (isLocked) {
-                const pQuery = query(collection(db, 'participants'), where('categoryId', '==', categoryId));
-                const sQuery = query(collection(db, 'scores'), where('categoryId', '==', categoryId));
-
-                const [pSnap, sSnap] = await Promise.all([getDocs(pQuery), getDocs(sQuery)]);
-
-                // Group scores logic (Duplicate from above, could be helper function but inline for safety)
-                const pScores = {};
-                sSnap.docs.forEach(doc => {
-                    const s = doc.data();
-                    const pId = s.participantId;
-                    const total = Object.values(s.values || {}).reduce((sum, v) => sum + (parseFloat(v) || 0), 0);
-                    if (!pScores[pId]) pScores[pId] = [];
-                    pScores[pId].push(total);
-                });
-
-                const participantsData = pSnap.docs.map(d => {
-                    const p = d.data();
-                    const id = p.id || d.id.split('_').pop();
-                    const totals = pScores[id] || [];
-                    let finalScore = 0;
-                    if (totals.length > 0) {
-                        const sumTotal = totals.reduce((a, b) => a + b, 0);
-                        finalScore = parseFloat((sumTotal / totals.length).toFixed(2));
-                    }
-                    return { ...p, _ref: d.ref, _score: finalScore };
-                });
-
-                participantsData.sort((a, b) => b._score - a._score);
-
-                let currentRank = 1;
-                participantsData.forEach((p, idx) => {
-                    if (idx > 0 && Math.abs(p._score - participantsData[idx - 1]._score) > 0.001) {
-                        currentRank = idx + 1;
-                    }
-                    p._calculatedRank = p._score > 0 ? currentRank : null;
-                });
-
-                participantsData.forEach(p => {
-                    const updates = { rankFixed: true };
-                    // If no rank exists, use calculated
-                    if (p.rank === null || p.rank === undefined) {
-                        if (p._calculatedRank !== null) {
-                            updates.rank = p._calculatedRank;
-                        }
-                    }
-                    batch.update(p._ref, updates);
-                });
-            }
-
-            await batch.commit();
+            await updateDoc(compRef, { categories });
         }
     },
+
+    // We need to correct the replacement to cover the range.
+
 
     // 종목 정보 수정 (이름 변경 등)
     updateCategory: async (compId, categoryId, newName) => {
@@ -898,30 +756,6 @@ const useStore = create((set, get) => ({
 
 
 
-    // 종목 잠금/해제 개별 토글
-    toggleCategoryLock: async (compId, categoryId, isLocked) => {
-        const compRef = doc(db, 'competitions', compId);
-        const compSnap = await getDoc(compRef);
-        if (compSnap.exists()) {
-            const categories = (compSnap.data().categories || []).map(c =>
-                c.id === categoryId ? { ...c, locked: isLocked } : c
-            );
-
-            const batch = writeBatch(db);
-
-            // 1. Update Competition (Categories array)
-            batch.update(compRef, { categories });
-
-            // 2. If Locking, we no longer need to lock ranks via rankFixed
-            // as we use the finalRank override system.
-            if (isLocked) {
-                // Future consideration: Should we auto-snapshot calculatedRank to finalRank when locking?
-                // For now, we do nothing to the participants.
-            }
-
-            await batch.commit();
-        }
-    },
 
     // 심사위원 관련 액션
     // 심사위원 추가

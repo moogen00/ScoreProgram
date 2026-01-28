@@ -611,6 +611,10 @@ const AdminPanel = () => {
                                                 <div className="flex items-center gap-2">
                                                     <button
                                                         onClick={() => {
+                                                            if (comp.locked && cat.locked) {
+                                                                alert("대회 설정을 먼저 Unlock 하라");
+                                                                return;
+                                                            }
                                                             const msg = cat.locked ? `'${cat.name}' 잠금을 해제하시겠습니까?` : `'${cat.name}' 종목을 잠금 하시겠습니까?`;
                                                             if (confirm(msg)) toggleCategoryLock(comp.id, cat.id, !cat.locked);
                                                         }}
@@ -868,8 +872,8 @@ const AdminPanel = () => {
                                                             </tr>
                                                         )}
                                                         <tr className={`transition - colors ${p.isTied
-                                                                ? "bg-amber-500/5 hover:bg-amber-500/10"
-                                                                : "hover:bg-white/[0.02]"
+                                                            ? "bg-amber-500/5 hover:bg-amber-500/10"
+                                                            : "hover:bg-white/[0.02]"
                                                             }`}>
                                                             <td className="px-6 py-5 text-center">
                                                                 <div className="flex flex-col items-center gap-1">
