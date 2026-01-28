@@ -68,15 +68,44 @@ const Scorer = () => {
     });
 
     // 스토어 점수와 로컬 입력 상태 동기화 (초기 진입 시)
+    // 스토어 점수와 로컬 입력 상태 동기화 (초기 진입 시 및 카테고리 변경 시에만)
+    // 문제 해결: 다른 심사위원이 점수를 제출해서 'scores'가 업데이트될 때,
+    // 내 로컬 입력값(localScores)이 덮어씌워지는 것을 방지해야 함.
     useEffect(() => {
         if (!selectedCategoryId || !currentUser) return;
 
-        const initialScores = {};
-        categoryParticipants.forEach(p => {
-            const userScores = scores[selectedCategoryId]?.[p.id]?.[userEmail] || {};
-            initialScores[p.id] = { ...userScores };
+        // 이미 로컬 상태가 있고, 카테고리가 변경된 게 아니라면 (즉, 단순 점수 업데이트라면)
+        // 로컬 상태를 유지하여 입력 중인 데이터 보호
+        setLocalScores(prev => {
+            const isNewCategory = Object.keys(prev).length === 0;
+            // *더 정확한 체크 필요: categoryId가 바뀌었을 때만 리셋해야 함.
+            // 하지만 useEffect 의존성에 selectedCategoryId가 있으므로, 
+            // 여기서는 '서버 데이터'와 '로컬 데이터'를 병합하는 전략이 안전함.
+
+            const newScores = { ...prev };
+            categoryParticipants.forEach(p => {
+                const serverScores = scores[selectedCategoryId]?.[p.id]?.[userEmail] || {};
+
+                // 로컬에 값이 없으면 서버 값으로 채움 (초기 로딩)
+                // 로컬에 값이 있어도, 서버 값이 '더 최신'일 수 있으나...
+                // 실시간 입력 중에는 로컬 값이 우선이어야 함. 
+                // 따라서 '로컬에 키가 없을 때만' 서버 값을 가져오거나, 
+                // 아예 초기 로딩(빈 상태)일 때만 가져오도록 함.
+                if (!newScores[p.id]) {
+                    newScores[p.id] = { ...serverScores };
+                } else {
+                    // 이미 p.id에 대한 로컬 객체가 있는 경우
+                    // 비어있는 필드만 서버 데이터로 채워넣기 (Merge)
+                    // (또는 아예 건드리지 않기 - 입력 안전성 최우선)
+                    Object.entries(serverScores).forEach(([k, v]) => {
+                        if (newScores[p.id][k] === undefined || newScores[p.id][k] === '') {
+                            newScores[p.id][k] = v;
+                        }
+                    });
+                }
+            });
+            return newScores;
         });
-        setLocalScores(initialScores);
     }, [selectedCategoryId, currentUser, scores, categoryParticipants, userEmail]);
 
     // 점수 입력 핸들러 (실시간 입력 제한 및 로컬 상태 업데이트)
@@ -216,42 +245,50 @@ const Scorer = () => {
     // 채점 항목 정렬 (Order 기준)
     const sortedItems = [...scoringItems].sort((a, b) => a.order - b.order);
 
-    // 참가자 랭킹 계산 (DB Rank 우선 정렬)
+    // 참가자 랭킹 계산 (DB Rank 우선, 없으면 점수 기반 실시간 계산)
     const rankedParticipants = useMemo(() => {
         if (categoryParticipants.length === 0) return [];
 
+        // 1. 점수 계산 및 내림차순 정렬
         const scored = categoryParticipants.map(p => {
             const total = getParticipantTotal(p.id);
             return { ...p, scoreForRanking: total };
-        }).sort((a, b) => {
-            // 1. DB Rank Priority (Ascending, Nulls last)
-            // If both have rank
-            if (a.rank !== null && a.rank !== undefined && b.rank !== null && b.rank !== undefined) {
-                return a.rank - b.rank;
-            }
-            // If only a has rank, comes first
-            if (a.rank !== null && a.rank !== undefined) return -1;
-            if (b.rank !== null && b.rank !== undefined) return 1;
+        }).sort((a, b) => b.scoreForRanking - a.scoreForRanking);
 
-            // 2. Score Priority (Descending) for unranked
-            return b.scoreForRanking - a.scoreForRanking;
+        // 2. 실시간 랭킹 계산 (동점자 처리 포함)
+        let currentCalcRank = 1;
+        scored.forEach((p, idx) => {
+            if (idx > 0 && Math.abs(p.scoreForRanking - scored[idx - 1].scoreForRanking) > 0.001) {
+                currentCalcRank = idx + 1;
+            }
+            p.calculatedRank = p.scoreForRanking > 0 ? currentCalcRank : '-';
         });
 
-        // Determine Ties based on DB Rank
-        // If multiple people have SAME Rank (and rank is not null), they are tied.
+        // 3. 최종 표시용 랭킹 결정 (DB Rank > Calculated Rank)
+        const finalResults = scored.map(s => {
+            // DB Rank가 있으면 그것을, 없으면 계산된 랭킹을 사용
+            // 단, 점수가 0이면 랭킹 없음('-') 처리
+            const displayRank = (s.rank !== null && s.rank !== undefined)
+                ? s.rank
+                : s.calculatedRank;
+
+            return {
+                ...s,
+                rank: displayRank
+            };
+        });
+
+        // 4. 동점자 여부 확인 (최종 결정된 rank 기준)
         const rankCounts = {};
-        scored.forEach(p => {
-            if (p.rank) {
+        finalResults.forEach(p => {
+            if (p.rank !== '-') {
                 rankCounts[p.rank] = (rankCounts[p.rank] || 0) + 1;
             }
         });
 
-        // We do NOT recalculate ranks here. We trust the DB.
-
-        return scored.map(s => ({
+        return finalResults.map(s => ({
             ...s,
-            rank: s.rank || '-', // Display DB rank or dash
-            isTied: s.rank && rankCounts[s.rank] > 1
+            isTied: false
         }));
     }, [categoryParticipants, getParticipantTotal]);
 
@@ -478,23 +515,13 @@ const Scorer = () => {
                                                 const displayTotal = getParticipantTotal(p.id).toFixed(2);
 
                                                 return (
-                                                    <tr key={p.id} className={`transition-colors group ${p.isTied ? "bg-amber-500/10 hover:bg-amber-500/20" : "hover:bg-white/[0.02]"
-                                                        }`}>
-                                                        <td className={`sticky left-0 z-10 backdrop-blur-sm px-4 py-3 text-center font-black text-lg shadow-[1px_0_0_rgba(255,255,255,0.05)] transition-colors ${p.isTied
-                                                            ? "bg-[#1a1500]/95 text-amber-500 group-hover:bg-[#2a2000]/95"
-                                                            : "bg-[#0f172a]/95 text-slate-600 group-hover:bg-[#151e32]/95"
-                                                            }`}>
+                                                    <tr key={p.id} className="transition-colors group hover:bg-white/[0.02]">
+                                                        <td className="sticky left-0 z-10 backdrop-blur-sm px-4 py-3 text-center font-black text-lg shadow-[1px_0_0_rgba(255,255,255,0.05)] transition-colors bg-[#0f172a]/95 text-slate-600 group-hover:bg-[#151e32]/95">
                                                             {p.number}
                                                         </td>
-                                                        <td className={`sticky left-16 z-10 backdrop-blur-sm px-4 py-3 shadow-[4px_0_10px_rgba(0,0,0,0.3)] transition-colors text-xs ${p.isTied
-                                                            ? "bg-[#1a1500]/95 group-hover:bg-[#2a2000]/95"
-                                                            : "bg-[#0f172a]/95 group-hover:bg-[#151e32]/95"
-                                                            }`}>
+                                                        <td className="sticky left-16 z-10 backdrop-blur-sm px-4 py-3 shadow-[4px_0_10px_rgba(0,0,0,0.3)] transition-colors text-xs bg-[#0f172a]/95 group-hover:bg-[#151e32]/95">
                                                             <div className="flex items-center gap-2">
                                                                 <div className="font-bold text-white text-base truncate max-w-[150px]">{p.name}</div>
-                                                                {p.isTied && (
-                                                                    <span className="text-[9px] font-black bg-amber-500 text-black px-1.5 py-0.5 rounded animate-pulse">TIE</span>
-                                                                )}
                                                                 {((isAdmin && !isJudgeForThisComp) || (isSpectator && isLocked)) && (
                                                                     <span className="text-[12px] font-black px-2 py-0.5 rounded bg-rose-500/20 text-rose-400 border border-rose-500/30 shadow-[0_0_10px_rgba(244,63,94,0.3)]">
                                                                         R{p.rank}
@@ -598,26 +625,14 @@ const Scorer = () => {
                                         const displayTotal = getParticipantTotal(p.id).toFixed(2);
 
                                         return (
-                                            <div key={p.id} className={`rounded-xl border overflow-hidden shadow-lg ${p.isTied
-                                                ? "bg-amber-900/10 border-amber-500/30 shadow-[0_0_15px_-5px_rgba(245,158,11,0.2)]"
-                                                : "bg-slate-800/50 border-white/10"
-                                                }`}>
+                                            <div key={p.id} className="rounded-xl border overflow-hidden shadow-lg bg-slate-800/50 border-white/10">
                                                 {/* Card Header */}
-                                                <div className={`px-4 py-3 flex items-center justify-between border-b ${p.isTied
-                                                    ? "bg-amber-900/20 border-amber-500/20"
-                                                    : "bg-slate-900/80 border-white/5"
-                                                    }`}>
+                                                <div className="px-4 py-3 flex items-center justify-between border-b bg-slate-900/80 border-white/5">
                                                     <div className="flex items-center gap-3">
-                                                        <div className={`w-8 h-8 rounded-lg flex items-center justify-center font-black text-sm border ${p.isTied
-                                                            ? "bg-amber-500/20 border-amber-500/30 text-amber-500"
-                                                            : "bg-indigo-500/20 border-indigo-500/30 text-indigo-400"
-                                                            }`}>
+                                                        <div className="w-8 h-8 rounded-lg flex items-center justify-center font-black text-sm border bg-indigo-500/20 border-indigo-500/30 text-indigo-400">
                                                             {p.number}
                                                         </div>
                                                         <span className="font-bold text-white truncate max-w-[100px]">{p.name}</span>
-                                                        {p.isTied && (
-                                                            <span className="text-[9px] font-black bg-amber-500 text-black px-1.5 py-0.5 rounded animate-pulse">TIE</span>
-                                                        )}
                                                         {((isAdmin && !isJudgeForThisComp) || (isSpectator && isLocked)) && (
                                                             <span className="text-[12px] font-black px-2 py-0.5 rounded bg-rose-500/20 text-rose-400 border border-rose-500/30 shadow-[0_0_10px_rgba(244,63,94,0.3)]">
                                                                 R{p.rank}

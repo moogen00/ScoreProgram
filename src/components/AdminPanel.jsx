@@ -169,8 +169,8 @@ const AdminPanel = () => {
         }
     };
 
-    // 참가자 정보 수정 검증 및 업데이트
-    const validateAndUpdateParticipant = (categoryId, pId, newNumber, newName, newRank, newRankFixed) => {
+    // 참가자 정보 수정 검증 및 업데이트 (Rank Reordering Logic Added)
+    const validateAndUpdateParticipant = async (categoryId, pId, newNumber, newName, newRank, newRankFixed) => {
         const number = newNumber.trim();
         const name = newName.trim();
 
@@ -184,30 +184,75 @@ const AdminPanel = () => {
             return;
         }
 
-        // newRank comes from input string
-        const updateData = { number, name };
+        try {
+            // Rank Update Logic with Auto-Reordering (Dense Ranking)
+            // If Fixing Rank (Manual Override)
+            if (newRankFixed && newRank) {
+                const targetRank = parseInt(newRank, 10);
 
-        // Handle Rank Logic
-        if (newRankFixed) {
-            if (newRank) {
-                updateData.rank = parseInt(newRank, 10);
-                updateData.rankFixed = true;
+                // 1. Create a mutable copy and apply the target change tentatively
+                // If other participants have no rank, we push them to the end (9999)
+                let pList = currentList.map(p => ({
+                    ...p,
+                    rank: p.id === pId ? targetRank : (p.rank || 9999)
+                }));
+
+                // 2. Sort by Rank
+                // We trust the manual intervention: if user sets P1 to 3, and P2 is 1, P3 is 2 -> Order: P2, P3, P1
+                pList.sort((a, b) => a.rank - b.rank);
+
+                // 3. Re-assign sequential ranks (Dense Ranking / Reshuffling)
+                // "Filling the gaps": The sorted order determines the new 1..N sequence
+                const { writeBatch, doc } = await import('firebase/firestore');
+                const { db } = await import('../lib/firebase');
+                const batch = writeBatch(db);
+
+                pList.forEach((p, index) => {
+                    const newSequentialRank = index + 1;
+                    const ref = doc(db, 'participants', `${categoryId}_${p.id}`);
+
+                    const pUpdates = {
+                        rank: newSequentialRank,
+                        rankFixed: true
+                    };
+
+                    // If this is the target participant, also update name/number
+                    if (p.id === pId) {
+                        pUpdates.number = number;
+                        pUpdates.name = name;
+                    }
+
+                    batch.update(ref, pUpdates);
+                });
+
+                await batch.commit();
+
             } else {
-                // User clicked "Fixed" but cleared input? Treat as Unfixed/Auto
-                updateData.rankFixed = false;
-            }
-        } else {
-            // User Explicitly clicked "Auto" or unchecked fixed (if we had checkbox)
-            // But here we might just pass explicit fixed flag
-            updateData.rankFixed = false;
-            // We don't set rank here, Auto-Sync will handle it. 
-            // OR we can clear it to null to signal reset?
-            // Let's set rank: null so auto-calc fills it.
-            updateData.rank = null;
-        }
+                // Auto Rank Mode (or simple metadata update without rank change if not fixed)
+                const updateData = { number, name };
 
-        updateParticipant(categoryId, pId, updateData);
-        setEditingPId(null);
+                if (newRankFixed === false) {
+                    updateData.rank = null; // Reset to Auto
+                    updateData.rankFixed = false;
+                } else {
+                    // newRankFixed is true but newRank is empty? 
+                    // Should imply clearing rank or error? 
+                    // Existing logic: "User clicked 'Fixed' but cleared input? Treat as Unfixed/Auto" matches above
+                }
+
+                await updateParticipant(categoryId, pId, updateData);
+            }
+
+            setEditingPId(null);
+            setEditPNumber('');
+            setEditPName('');
+            setEditPRank('');
+            setEditPRankFixed(false);
+
+        } catch (error) {
+            console.error(error);
+            alert('수정 실패: ' + error.message);
+        }
     };
 
     // 리스트 순서 변경 핸들러
@@ -932,6 +977,32 @@ const AdminPanel = () => {
                                             className="bg-rose-600 hover:bg-rose-500 disabled:opacity-30 text-white px-4 py-2 rounded-lg text-xs font-bold transition-all whitespace-nowrap"
                                         >
                                             이 종목으로 모두 이동
+                                        </button>
+                                        <button
+                                            onClick={async () => {
+                                                if (confirm(`'${oldCatId}'에 연결된 ${ps.length}명의 참가자를 영구적으로 삭제하시겠습니까?\n이 작업은 되돌릴 수 없습니다.`)) {
+                                                    // Batch delete for efficiency
+                                                    const { doc, writeBatch } = await import('firebase/firestore');
+                                                    const { db } = await import('../lib/firebase');
+                                                    const batch = writeBatch(db);
+
+                                                    ps.forEach(p => {
+                                                        const ref = doc(db, 'participants', `${oldCatId}_${p.id}`);
+                                                        batch.delete(ref);
+                                                    });
+
+                                                    try {
+                                                        await batch.commit();
+                                                        alert('삭제되었습니다.');
+                                                    } catch (err) {
+                                                        console.error(err);
+                                                        alert('삭제 중 오류가 발생했습니다.');
+                                                    }
+                                                }
+                                            }}
+                                            className="bg-slate-700 hover:bg-slate-600 text-slate-300 px-4 py-2 rounded-lg text-xs font-bold transition-all whitespace-nowrap flex items-center gap-1"
+                                        >
+                                            <Trash2 size={14} /> 영구 삭제
                                         </button>
                                     </div>
                                 </div>
