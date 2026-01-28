@@ -387,6 +387,9 @@ const useStore = create((set, get) => ({
         console.log(`[Store] Committing batch for ${opCount} operations...`);
         await batch.commit();
         console.log('[Store] submitCategoryScores SUCCESS');
+
+        // 점수 제출 후 순위 재계산 및 DB 업데이트
+        await get().updateCategoryRanks(categoryId);
     },
 
     // 심사위원 제출 상태 토글 (제출 취소 및 수정 모드 전환)
@@ -443,6 +446,9 @@ const useStore = create((set, get) => ({
 
         await batch.commit();
         console.log(`[Store] toggleJudgeSubmission SUCCESS: ${categoryId} -> ${isSubmitted}`);
+
+        // 제출 상태 변경 후 순위 재계산 및 DB 업데이트
+        await get().updateCategoryRanks(categoryId);
     },
 
     // 관리 관련 액션
@@ -906,13 +912,11 @@ const useStore = create((set, get) => ({
             // 1. Update Competition (Categories array)
             batch.update(compRef, { categories });
 
-            // 2. If Locking, lock participants' ranks for this category
+            // 2. If Locking, we no longer need to lock ranks via rankFixed
+            // as we use the finalRank override system.
             if (isLocked) {
-                const pQuery = query(collection(db, 'participants'), where('categoryId', '==', categoryId));
-                const pSnap = await getDocs(pQuery);
-                pSnap.docs.forEach(d => {
-                    batch.update(d.ref, { rankFixed: true });
-                });
+                // Future consideration: Should we auto-snapshot calculatedRank to finalRank when locking?
+                // For now, we do nothing to the participants.
             }
 
             await batch.commit();
@@ -987,11 +991,10 @@ const useStore = create((set, get) => ({
             genre,
             category,
             number,
-            category,
-            number,
             name,
-            rank: null,      // DB-based Rank (Source of Truth)
-            rankFixed: false, // If true, Auto-Calc will not overwrite this rank
+            totalScore: 0,      // Real-time Total Score
+            calculatedRank: null, // Real-time Calculated Rank
+            finalRank: null,      // Admin-confirmed Final Rank
             createdAt: new Date().toISOString()
         });
     },
@@ -1409,6 +1412,67 @@ const useStore = create((set, get) => ({
 
     updateParticipant: async (categoryId, participantId, updates) => {
         await updateDoc(doc(db, 'participants', `${categoryId}_${participantId}`), updates);
+    },
+
+    // 종목 내 모든 참가자의 순위 재계산 및 업데이트 (제출 시 호출용)
+    updateCategoryRanks: async (categoryId) => {
+        const { participants, scores } = get();
+        const pList = participants[categoryId] || [];
+        const catScores = scores[categoryId] || {};
+
+        if (pList.length === 0) return;
+
+        // 1. 각 참가자별 평균 점수 계산 (심사위원별 총점의 평균)
+        const scored = pList.map(p => {
+            const pScores = catScores[p.id] || {};
+            const judgeEmails = Object.keys(pScores);
+            const judgeCount = judgeEmails.length;
+
+            // 모든 심사위원의 총점 합계 계산
+            const totalSum = judgeEmails.reduce((acc, email) => {
+                const itemScores = pScores[email] || {};
+                // 한 심사위원의 항목별 점수 합계
+                const judgeTotal = Object.values(itemScores).reduce((sum, val) => {
+                    const num = parseFloat(val);
+                    return isNaN(num) ? sum : sum + num;
+                }, 0);
+                return acc + judgeTotal;
+            }, 0);
+
+            const average = judgeCount > 0 ? totalSum / judgeCount : 0;
+            return { ...p, average };
+        });
+
+        // 2. 점수 내림차순 정렬 (자동 순위 결정용)
+        scored.sort((a, b) => b.average - a.average);
+
+        // 3. 순위 결정 (Standard Competition Ranking: 1224)
+        // 3. 순위 결정 (Standard Competition Ranking: 1224)
+        const newRanks = new Map();
+        let currentRank = 1;
+        scored.forEach((p, idx) => {
+            if (idx > 0 && Math.abs(p.average - scored[idx - 1].average) > 0.0001) {
+                currentRank = idx + 1;
+            }
+            newRanks.set(p.id, p.average > 0 ? Math.floor(currentRank) : null);
+        });
+
+        // 4. DB 업데이트 (Batch)
+        const batch = writeBatch(db);
+        scored.forEach(p => {
+            const calcR = newRanks.get(p.id);
+            const totS = parseFloat(p.average.toFixed(4));
+
+            // finalRank가 없는(자동 순위) 경우에만 변경 사항 업데이트
+            // (사실 calculatedRank와 totalScore는 항상 최신화 해두는 것이 리더보드 등에서 유리함)
+            batch.update(doc(db, 'participants', `${categoryId}_${p.id}`), {
+                calculatedRank: calcR,
+                totalScore: totS
+            });
+        });
+
+        await batch.commit();
+        console.log(`[Store] Category ${categoryId} ranks updated successfully.`);
     },
 
     removeParticipant: async (categoryId, participantId) => {

@@ -53,29 +53,21 @@ const Leaderboard = () => {
             // 평균 계산
             const average = judgeCount > 0 ? totalSum / judgeCount : 0;
             return { ...p, totalSum, average, judgeCount, judgeBreakdown, pScores };
-        }).sort((a, b) => { // DB Rank 우선 정렬
-            // 1. DB Rank Priority (Ascending, Nulls last)
-            if (a.rank !== null && a.rank !== undefined && b.rank !== null && b.rank !== undefined) {
-                return a.rank - b.rank;
-            }
-            if (a.rank !== null && a.rank !== undefined) return -1;
-            if (b.rank !== null && b.rank !== undefined) return 1;
-
-            // 2. Score Priority (Descending)
-            return b.average - a.average;
+        }).sort((a, b) => { // 수동 확정 순위(finalRank) 및 자동 순위 우선 정렬
+            const rA = a.finalRank || a.calculatedRank || 9999;
+            const rB = b.finalRank || b.calculatedRank || 9999;
+            if (rA !== rB) return rA - rB;
+            return b.average - a.average; // Use average for tie-breaking if ranks are the same
         });
 
-        // 순위 계산 (DB 기준)
-        // We just attach the DB rank to the object for display convenience if not already there,
-        // but actually we can just map it.
-        // Also handle "TIE" detection via duplicate ranks in DB? 
-        // Tie logic is handled by "Auto-Calc" in AdminPanel, so DB has same ranks for tigers.
-
+        // 순위 계산 및 동점자 처리
+        const rankCounts = {};
         return scored.map(d => ({
             ...d,
-            rank: d.rank || '-' // Use DB rank
+            rank: d.rank || '-', // Use DB rank
+            isTied: isAdmin && d.rank && rankCounts[d.rank] > 1
         }));
-    }, [categoryParticipants, categoryScores, judgeMap]);
+    }, [categoryParticipants, categoryScores, judgeMap, isAdmin]);
 
     const finalLeaderboard = leaderboardData;
 
@@ -122,13 +114,33 @@ const Leaderboard = () => {
                                     >
                                         <td className="px-8 py-6">
                                             {data.rank === 1 ? (
-                                                <div className="w-10 h-10 rounded-xl bg-amber-500/20 border border-amber-500/40 flex items-center justify-center text-amber-500 font-black italic shadow-lg shadow-amber-500/10">1st</div>
+                                                <div className="flex flex-col items-center gap-1">
+                                                    <div className="w-10 h-10 rounded-xl bg-amber-500/20 border border-amber-500/40 flex items-center justify-center text-amber-500 font-black italic shadow-lg shadow-amber-500/10">1st</div>
+                                                    {data.isTied && (
+                                                        <span className="text-[9px] font-black bg-amber-500 text-black px-1.5 py-0.5 rounded animate-pulse">TIE</span>
+                                                    )}
+                                                </div>
                                             ) : data.rank === 2 ? (
-                                                <div className="w-10 h-10 rounded-xl bg-slate-400/20 border border-slate-400/40 flex items-center justify-center text-slate-400 font-black italic">2nd</div>
+                                                <div className="flex flex-col items-center gap-1">
+                                                    <div className="w-10 h-10 rounded-xl bg-slate-400/20 border border-slate-400/40 flex items-center justify-center text-slate-400 font-black italic">2nd</div>
+                                                    {data.isTied && (
+                                                        <span className="text-[9px] font-black bg-slate-400 text-black px-1.5 py-0.5 rounded animate-pulse">TIE</span>
+                                                    )}
+                                                </div>
                                             ) : data.rank === 3 ? (
-                                                <div className="w-10 h-10 rounded-xl bg-orange-700/20 border border-orange-700/40 flex items-center justify-center text-orange-700 font-black italic">3rd</div>
+                                                <div className="flex flex-col items-center gap-1">
+                                                    <div className="w-10 h-10 rounded-xl bg-orange-700/20 border border-orange-700/40 flex items-center justify-center text-orange-700 font-black italic">3rd</div>
+                                                    {data.isTied && (
+                                                        <span className="text-[9px] font-black bg-orange-700 text-black px-1.5 py-0.5 rounded animate-pulse">TIE</span>
+                                                    )}
+                                                </div>
                                             ) : (
-                                                <span className="text-slate-600 pl-4">{data.rank}</span>
+                                                <div className="flex flex-col items-center gap-1">
+                                                    <span className="text-slate-600 pl-4">{data.rank}</span>
+                                                    {data.isTied && (
+                                                        <span className="text-[9px] font-black bg-amber-500 text-black px-1.5 py-0.5 rounded animate-pulse">TIE</span>
+                                                    )}
+                                                </div>
                                             )}
                                         </td>
                                         <td className="px-6 py-6">

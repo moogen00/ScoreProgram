@@ -245,7 +245,7 @@ const Scorer = () => {
     // 채점 항목 정렬 (Order 기준)
     const sortedItems = [...scoringItems].sort((a, b) => a.order - b.order);
 
-    // 참가자 랭킹 계산 (DB Rank 우선, 없으면 점수 기반 실시간 계산)
+    // 참가자 랭킹 계산 (finalRank 우선, 없으면 실시간 계산된 순위)
     const rankedParticipants = useMemo(() => {
         if (categoryParticipants.length === 0) return [];
 
@@ -261,40 +261,34 @@ const Scorer = () => {
             if (idx > 0 && Math.abs(p.scoreForRanking - scored[idx - 1].scoreForRanking) > 0.001) {
                 currentCalcRank = idx + 1;
             }
-            p.calculatedRank = p.scoreForRanking > 0 ? currentCalcRank : '-';
+            p.tempCalculatedRank = p.scoreForRanking > 0 ? currentCalcRank : '-';
         });
 
-        // 3. 최종 표시용 랭킹 결정 (DB Rank > Calculated Rank)
+        // 3. 최종 표시용 랭킹 결정 (finalRank > calculatedRank > 실시간 계산)
         const finalResults = scored.map(s => {
-            // DB Rank가 있으면 그것을, 없으면 계산된 랭킹을 사용
-            // 단, 점수가 0이면 랭킹 없음('-') 처리
-            const displayRank = (s.rank !== null && s.rank !== undefined)
-                ? s.rank
-                : s.calculatedRank;
-
-            return {
-                ...s,
-                rank: displayRank
-            };
+            // Priority: p.finalRank (Manual) > p.calculatedRank (Synced DB) > tempCalculatedRank (Real-time)
+            const displayRank = s.finalRank || s.calculatedRank || s.tempCalculatedRank;
+            return { ...s, rank: displayRank };
         });
 
         // 4. 동점자 여부 확인 (최종 결정된 rank 기준)
         const rankCounts = {};
         finalResults.forEach(p => {
-            if (p.rank !== '-') {
+            if (p.rank && p.rank !== '-') {
                 rankCounts[p.rank] = (rankCounts[p.rank] || 0) + 1;
             }
         });
 
+        const isAdmin = currentUser?.role === 'ADMIN' || currentUser?.role === 'ROOT_ADMIN';
         return finalResults.map(s => ({
             ...s,
-            isTied: false
+            isTied: isAdmin ? (s.rank && s.rank !== '-' && rankCounts[s.rank] > 1) : false
         }));
-    }, [categoryParticipants, getParticipantTotal]);
+    }, [categoryParticipants, getParticipantTotal, currentUser]);
 
     // 상위 3명 랭킹 위젯용 데이터
     const topRanked = useMemo(() => {
-        return rankedParticipants.slice(0, 3).filter(p => (typeof p.rank === 'number'));
+        return rankedParticipants.slice(0, 3).filter(p => (p.rank && p.rank !== '-'));
     }, [rankedParticipants]);
 
     // 참가자 번호순 정렬 (테이블 표시용)
@@ -515,17 +509,33 @@ const Scorer = () => {
                                                 const displayTotal = getParticipantTotal(p.id).toFixed(2);
 
                                                 return (
-                                                    <tr key={p.id} className="transition-colors group hover:bg-white/[0.02]">
-                                                        <td className="sticky left-0 z-10 backdrop-blur-sm px-4 py-3 text-center font-black text-lg shadow-[1px_0_0_rgba(255,255,255,0.05)] transition-colors bg-[#0f172a]/95 text-slate-600 group-hover:bg-[#151e32]/95">
+                                                    <tr key={p.id} className={cn(
+                                                        "transition-colors group hover:bg-white/[0.02]",
+                                                        p.isTied && "bg-amber-500/5 hover:bg-amber-500/10"
+                                                    )}>
+                                                        <td className={cn(
+                                                            "sticky left-0 z-10 backdrop-blur-sm px-4 py-3 text-center font-black text-lg shadow-[1px_0_0_rgba(255,255,255,0.05)] transition-colors",
+                                                            p.isTied ? "bg-amber-500/10 text-amber-500" : "bg-[#0f172a]/95 text-slate-600 group-hover:bg-[#151e32]/95"
+                                                        )}>
                                                             {p.number}
                                                         </td>
                                                         <td className="sticky left-16 z-10 backdrop-blur-sm px-4 py-3 shadow-[4px_0_10px_rgba(0,0,0,0.3)] transition-colors text-xs bg-[#0f172a]/95 group-hover:bg-[#151e32]/95">
                                                             <div className="flex items-center gap-2">
                                                                 <div className="font-bold text-white text-base truncate max-w-[150px]">{p.name}</div>
-                                                                {((isAdmin && !isJudgeForThisComp) || (isSpectator && isLocked)) && (
-                                                                    <span className="text-[12px] font-black px-2 py-0.5 rounded bg-rose-500/20 text-rose-400 border border-rose-500/30 shadow-[0_0_10px_rgba(244,63,94,0.3)]">
-                                                                        R{p.rank}
-                                                                    </span>
+                                                                {(isAdmin || (isSpectator && isLocked)) && (
+                                                                    <div className="flex items-center gap-1">
+                                                                        <span className={cn(
+                                                                            "text-[12px] font-black px-2 py-0.5 rounded border shadow-lg transition-all",
+                                                                            p.isTied
+                                                                                ? "bg-amber-500 text-black border-amber-500 shadow-amber-500/20"
+                                                                                : "bg-rose-500/20 text-rose-400 border-rose-500/30 shadow-black/20"
+                                                                        )}>
+                                                                            R{p.rank}
+                                                                        </span>
+                                                                        {p.isTied && (
+                                                                            <span className="text-[10px] font-black bg-amber-500 text-black px-1.5 py-0.5 rounded animate-pulse">TIE</span>
+                                                                        )}
+                                                                    </div>
                                                                 )}
                                                             </div>
                                                         </td>
@@ -633,12 +643,21 @@ const Scorer = () => {
                                                             {p.number}
                                                         </div>
                                                         <span className="font-bold text-white truncate max-w-[100px]">{p.name}</span>
-                                                        {((isAdmin && !isJudgeForThisComp) || (isSpectator && isLocked)) && (
-                                                            <span className="text-[12px] font-black px-2 py-0.5 rounded bg-rose-500/20 text-rose-400 border border-rose-500/30 shadow-[0_0_10px_rgba(244,63,94,0.3)]">
-                                                                R{p.rank}
-                                                            </span>
-                                                        )}
-                                                    </div>
+                                                        {(isAdmin || (isSpectator && isLocked)) && (
+                                                            <div className="flex items-center gap-1 mb-1">
+                                                                <span className={cn(
+                                                                    "text-[10px] font-black px-1.5 py-0.5 rounded border transition-all",
+                                                                    p.isTied
+                                                                        ? "bg-amber-500 text-black border-amber-500"
+                                                                        : "bg-rose-500/20 text-rose-400 border-rose-500/30"
+                                                                )}>
+                                                                    R{p.rank}
+                                                                </span>
+                                                                {p.isTied && (
+                                                                    <span className="text-[9px] font-black bg-amber-500 text-black px-1 py-0.5 rounded animate-pulse">TIE</span>
+                                                                )}
+                                                            </div>
+                                                        )}                                            </div>
                                                     <div className="text-right">
                                                         <span className="text-[10px] text-slate-500 uppercase font-black block">Total</span>
                                                         <span className="text-xl font-black text-indigo-400 tabular-nums leading-none">{displayTotal}</span>

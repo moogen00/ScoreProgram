@@ -19,7 +19,7 @@ const AdminPanel = () => {
         competitionName, setCompetitionName,
         seedRandomScores, clearCompetitionScores,
         exportData, importData, clearAllData, normalizeDatabase, fixLockedProperties,
-        currentUser, syncCompetitionData,
+        currentUser, syncCompetitionData, syncCategoryScores,
         adminTab, setAdminTab,
         isResetting, resetStatus, isExporting,
         addCompetition, updateCompetition, deleteCompetition,
@@ -75,6 +75,13 @@ const AdminPanel = () => {
             syncCompetitionData(manageCompId);
         }
     }, [manageCompId, syncCompetitionData]);
+
+    // 종목 변경 시 점수 데이터 동기화
+    useEffect(() => {
+        if (manageCatId) {
+            syncCategoryScores(manageCatId);
+        }
+    }, [manageCatId, syncCategoryScores]);
 
     // 현재 선택된 종목 정보 조회 함수
     const findCatInfo = () => {
@@ -170,8 +177,8 @@ const AdminPanel = () => {
         }
     };
 
-    // 참가자 정보 수정 검증 및 업데이트 (Rank Reordering Logic Added)
-    const validateAndUpdateParticipant = async (categoryId, pId, newNumber, newName, newRank, newRankFixed) => {
+    // 참가자 정보 수정 검증 및 업데이트
+    const validateAndUpdateParticipant = async (categoryId, pId, newNumber, newName, newRank) => {
         const number = newNumber.trim();
         const name = newName.trim();
 
@@ -186,74 +193,19 @@ const AdminPanel = () => {
         }
 
         try {
-            // Rank Update Logic with Auto-Reordering (Dense Ranking)
-            // If Fixing Rank (Manual Override)
-            if (newRankFixed && newRank) {
-                let targetRank = parseInt(newRank, 10);
-                if (targetRank < 1) targetRank = 1; // Prevent negative/zero rank
+            // finalRank 업데이트 (입력값이 없으면 null로 저장하여 자동 순위 노출)
+            const finalRankVal = newRank ? parseInt(newRank, 10) : null;
 
-                // 1. Create a mutable copy and apply the target change tentatively
-                // If other participants have no rank, we push them to the end (9999)
-                let pList = currentList.map(p => ({
-                    ...p,
-                    rank: p.id === pId ? targetRank : (p.rank || 9999)
-                }));
-
-                // 2. Sort by Rank
-                // We trust the manual intervention: if user sets P1 to 3, and P2 is 1, P3 is 2 -> Order: P2, P3, P1
-                pList.sort((a, b) => a.rank - b.rank);
-
-                // 3. Re-assign sequential ranks (Dense Ranking / Reshuffling)
-                // "Filling the gaps": The sorted order determines the new 1..N sequence
-                const { writeBatch, doc } = await import('firebase/firestore');
-                const { db } = await import('../lib/firebase');
-                const batch = writeBatch(db);
-
-                pList.forEach((p, index) => {
-                    const newSequentialRank = index + 1;
-                    const ref = doc(db, 'participants', `${categoryId}_${p.id}`);
-
-                    const pUpdates = {
-                        rank: newSequentialRank,
-                        rankFixed: true
-                    };
-
-                    // If this is the target participant, also update name/number
-                    if (p.id === pId) {
-                        pUpdates.number = number;
-                        pUpdates.name = name;
-                    }
-
-                    batch.update(ref, pUpdates);
-                });
-
-                await batch.commit();
-
-            } else {
-                // Auto Rank Mode (or simple metadata update without rank change if not fixed)
-                const updateData = { number, name };
-
-                if (newRankFixed === false) {
-                    updateData.rank = null; // Reset to Auto
-                    updateData.rankFixed = false;
-                } else {
-                    // newRankFixed is true but newRank is empty? 
-                    // Should imply clearing rank or error? 
-                    // Existing logic: "User clicked 'Fixed' but cleared input? Treat as Unfixed/Auto" matches above
-                }
-
-                await updateParticipant(categoryId, pId, updateData);
-            }
+            await updateParticipant(categoryId, pId, {
+                number,
+                name,
+                finalRank: finalRankVal
+            });
 
             setEditingPId(null);
-            setEditPNumber('');
-            setEditPName('');
-            setEditPRank('');
-            setEditPRankFixed(false);
-
         } catch (error) {
-            console.error(error);
-            alert('수정 실패: ' + error.message);
+            console.error('[Admin] Update Participant Error:', error);
+            alert('정보 수정 중 오류가 발생했습니다.');
         }
     };
 
@@ -327,127 +279,115 @@ const AdminPanel = () => {
     const calculateStatsOnly = useCallback((ps, catScores) => {
         if (!ps || ps.length === 0) return [];
 
+        // Debug Score Data Presence
+        const pIdsWithScores = Object.keys(catScores || {});
+        // console.log(`[Admin] Calculating stats for ${ps.length} participants. Scored ones: ${pIdsWithScores.length}`);
+
         return ps.map(p => {
             const pScores = catScores[p.id] || {};
             const judgeEmails = Object.keys(pScores);
             const judgeCount = judgeEmails.length;
+
+            // Sum all scores from all judges for this participant
             const totalSum = judgeEmails.reduce((sum, email) => {
                 const itemScores = pScores[email] || {};
-                const judgeSum = Object.values(itemScores).reduce((a, b) => a + b, 0);
+                const judgeSum = Object.values(itemScores).reduce((a, b) => {
+                    const val = parseFloat(b);
+                    return isNaN(val) ? a : a + val;
+                }, 0);
                 return sum + judgeSum;
             }, 0);
+
+            // Important: We need to average across total items across all judges? 
+            // Or average of judge-sums? Standard: (Sum of all items) / (Judge Count) if all items weighted equally
+            // Existing logic: totalSum / judgeCount
             const average = judgeCount > 0 ? totalSum / judgeCount : 0;
+
             return { ...p, totalSum, average, judgeCount };
         });
     }, []);
 
     // -------------------------------------------------------------------------
-    // AUTO-RANK SYNC LOGIC
+    // AUTO-RANK DISPLAY LOGIC
     // -------------------------------------------------------------------------
-    // This effect runs whenever scores or participants change.
-    // It calculates the theoretical scores, determines ranks, and UPDATES DB if needed.
-    // This ensures DB always has the "current correct rank" unless Fixed.
-    useEffect(() => {
-        if (!manageCatId || !scores[manageCatId] || !participants[manageCatId]) return;
-
-        const ps = participants[manageCatId];
-        const catScores = scores[manageCatId];
-
-        // 1. Calculate Scores
-        const scored = calculateStatsOnly(ps, catScores);
-
-        // 2. Sort by Average Descending (to determine Auto Rank)
-        scored.sort((a, b) => b.average - a.average);
-
-        // 3. Determine Ranks (Standard Competition Ranking with Ties)
-        // Tie Logic:
-        // Rank 1 (10.0), Rank 1 (10.0), Rank 3 (9.0)...
-        const newRanks = new Map(); // p.id -> rank (number)
-
-        let currentRank = 1;
-        scored.forEach((p, idx) => {
-            // If idx > 0 and score < prev score, update currentRank
-            if (idx > 0 && Math.abs(p.average - scored[idx - 1].average) > 0.0001) {
-                currentRank = idx + 1;
-            }
-            // If score is 0, maybe no rank? 
-            // Existing logic: "p.average > 0 ? currentRank : '-'"
-            // Let's store NULL if no score aka 0.
-            newRanks.set(p.id, p.average > 0 ? currentRank : null);
-        });
-
-        // 4. Batch Update Diff
-        // For each participant, if !rankFixed, check if DB rank matches newRank.
-        scored.forEach(p => {
-            if (p.rankFixed) return; // Skip manual override
-
-            const calculatedRank = newRanks.get(p.id);
-            // Check if different (handle nulls)
-            if (p.rank !== calculatedRank) {
-                // Trigger Update
-                // We use updateParticipant. 
-                // WARNING: Calling this inside loop/effect might cause spam if not careful.
-                // But Firestore updates will trigger listener -> participants update -> effect runs.
-                // If p.rank == calculatedRank, no update -> stable.
-                // Optimization: Maybe we should debounce this? 
-                // But usually standard loop is fine as it stabilizes in one pass.
-                console.log(`[Auto-Rank] Updating ${p.name}: ${p.rank} -> ${calculatedRank}`);
-                updateParticipant(manageCatId, p.id, { rank: calculatedRank });
-            }
-        });
-
-    }, [manageCatId, scores, participants, calculateStatsOnly, updateParticipant]);
+    // Note: Automatic DB synchronization (syncing totalScore/calculatedRank to DB via useEffect) 
+    // has been removed as per user request. Ranking data in DB is now updated only 
+    // upon "Save & Submit" from the Scorer.
+    // The Admin Panel still calculates real-time ranks for display purposes only.
 
     // -------------------------------------------------------------------------
     // DISPLAY LIST GENERATION
     // -------------------------------------------------------------------------
     const getScoredParticipants = useCallback((ps, catScores) => {
-        // Just calculate stats for display. Rank comes from DB (passed in 'ps')
+        // Just calculate stats for display.
         const withStats = calculateStatsOnly(ps, catScores);
 
-        // Sort for Display: 
-        // Primary: Rank (Asc) - (Nulls last)
-        // Secondary: Score (Desc)
-        return withStats.sort((a, b) => {
-            const rA = a.rank ?? 999999;
-            const rB = b.rank ?? 999999;
-            if (rA !== rB) return rA - rB;
-            return b.average - a.average;
-        }).map(p => {
-            // Determine "Tie" for display badge
-            // If DB ranks are equal, it's a tie. 
-            // We need to look at neighbors in the *sorted* list?
-            // Actually, we can just check if anyone else has same rank. But efficient way?
-            // Post-sort map check?
-            return p;
+        // Sort for Display: Participant Number (Back No.) - Numeric
+        return withStats.sort((a, b) =>
+            a.number.localeCompare(b.number, undefined, { numeric: true })
+        );
+    }, [calculateStatsOnly]);
+    // 동점 감지 및 최종 순위 로직
+    const scoredParticipantsWithTies = useMemo(() => {
+        const currentPs = participants[manageCatId] || [];
+        const currentScores = scores[manageCatId] || {};
+
+        // 최신 평균 점수를 기반으로 실시간 순위 계산
+        const list = calculateStatsOnly(currentPs, currentScores);
+        if (list.length === 0) return [];
+
+        // 2. 평균 점수 내림차순 정렬 (순위 계산용)
+        const sortedByScore = [...list].sort((a, b) => b.average - a.average);
+
+        // 3. 실시간 순위 계산 (1224 방식)
+        const realTimeRanks = new Map();
+        let curR = 1;
+        sortedByScore.forEach((p, idx) => {
+            if (idx > 0 && Math.abs(p.average - sortedByScore[idx - 1].average) > 0.0001) {
+                curR = idx + 1;
+            }
+            realTimeRanks.set(p.id, p.average > 0 ? Math.floor(curR) : '-');
         });
 
-    }, [calculateStatsOnly]);
-
-    // Add Tie Detection to the final mapped array
-    const scoredParticipantsWithTies = useMemo(() => {
-        const list = getScoredParticipants(participants[manageCatId], scores[manageCatId] || {});
-
-        // Mark Ties
-        const rankCounts = {};
+        // 표시 순위 결정 및 동점 카운트
+        const rankCounts = {}; // For display rank ties
+        const scoreCounts = {}; // For perfect score ties
         list.forEach(p => {
-            if (p.rank) {
-                rankCounts[p.rank] = (rankCounts[p.rank] || 0) + 1;
+            const avg = p.average.toFixed(4);
+            if (p.average > 0) {
+                scoreCounts[avg] = (scoreCounts[avg] || 0) + 1;
             }
         });
 
-        return list.map(p => ({
-            ...p,
-            isTied: p.rank && rankCounts[p.rank] > 1
-        }));
-    }, [getScoredParticipants, participants, manageCatId, scores]);
+        const withDisplayRank = list.map(p => {
+            const calculated = realTimeRanks.get(p.id);
+            // 우선순위: finalRank (수동 고정) > calculatedRank (DB에 저장된 자동 순위) > 실시간 계산 순위
+            const rawRank = p.finalRank || p.calculatedRank || calculated;
+            const displayRank = (rawRank !== '-' && rawRank !== null) ? parseInt(rawRank, 10) : '-';
+
+            const rStr = String(displayRank);
+            if (rStr !== '-' && rStr !== 'null') {
+                rankCounts[rStr] = (rankCounts[rStr] || 0) + 1;
+            }
+            return { ...p, displayRank };
+        });
+
+        // 참가자 번호순 정렬 및 동점 경고 배지 추가
+        return withDisplayRank.sort((a, b) => a.number.localeCompare(b.number, undefined, { numeric: true }))
+            .map(p => {
+                const scoreStr = p.average.toFixed(4);
+                return {
+                    ...p,
+                    rank: p.displayRank,
+                    isTied: p.average > 0 && scoreCounts[scoreStr] > 1
+                };
+            });
+    }, [calculateStatsOnly, participants, manageCatId, scores]);
 
     // 현재 관리 중인 종목의 참가자 랭킹 목록 계산
     const rankedCategoryParticipants = useMemo(() => {
-        const ps = participants[manageCatId] || [];
-        const catScores = scores[manageCatId] || {};
-        return getScoredParticipants(ps, catScores);
-    }, [participants, scores, manageCatId, getScoredParticipants]);
+        return scoredParticipantsWithTies;
+    }, [scoredParticipantsWithTies]);
 
     // 대회별 전체 참가자 목록 점수 및 랭킹 계산 (전체 현황용)
     const getCompParticipants = useCallback(() => {
@@ -478,16 +418,31 @@ const AdminPanel = () => {
         const compRankMap = new Map();
         let currentRank = 1;
         sortedByAvg.forEach((p, idx) => {
-            if (idx > 0 && p.average < sortedByAvg[idx - 1].average) {
+            if (idx > 0 && Math.abs(p.average - sortedByAvg[idx - 1].average) > 0.0001) {
                 currentRank = idx + 1;
             }
             compRankMap.set(`${p.categoryId}_${p.id}`, p.average > 0 ? currentRank : '-');
         });
 
-        return all.map(p => ({
-            ...p,
-            compRank: compRankMap.get(`${p.categoryId}_${p.id}`)
-        }));
+        // Create category tie maps using compRankMap (which includes auto-calculated ranks)
+        const catTieMaps = {};
+        all.forEach(p => {
+            if (!catTieMaps[p.categoryId]) catTieMaps[p.categoryId] = {};
+            const tieMap = catTieMaps[p.categoryId];
+            const r = String(compRankMap.get(`${p.categoryId}_${p.id}`) || '-');
+            if (r !== '-') {
+                tieMap[r] = (tieMap[r] || 0) + 1;
+            }
+        });
+
+        return all.map(p => {
+            const r = String(compRankMap.get(`${p.categoryId}_${p.id}`) || '-');
+            return {
+                ...p,
+                compRank: r === '-' ? '-' : Number(r),
+                isTied: r !== '-' && catTieMaps[p.categoryId][r] > 1
+            };
+        });
     }, [manageCompId, competitions, participants, scores, sortConfig, getScoredParticipants]);
 
     const compAllParticipants = useMemo(() => getCompParticipants(), [getCompParticipants]);
@@ -769,11 +724,11 @@ const AdminPanel = () => {
                                     <button type="submit" className="bg-emerald-600 hover:bg-emerald-500 text-white py-3 rounded-xl font-bold flex items-center justify-center gap-2 transition-all hover:scale-[1.02]"><UserPlus size={20} /> 참가자 등록</button>
                                 </form>
                                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-                                    {scoredParticipantsWithTies.sort((a, b) => a.number.localeCompare(b.number, undefined, { numeric: true })).map(p => (
-                                        <div key={p.id} className={`p-4 rounded-xl flex items-center justify-between group transition-all ${p.isTied
-                                            ? "bg-amber-500/10 border border-amber-500/30 shadow-[0_0_15px_-5px_rgba(245,158,11,0.3)]"
-                                            : "bg-white/5 border border-white/10"
-                                            }`}>
+                                    {scoredParticipantsWithTies.map(p => (
+                                        <div key={p.id} className={cn(
+                                            "p-4 rounded-xl flex items-center justify-between group transition-all",
+                                            p.isTied ? "bg-amber-500/10 border border-amber-500/30 shadow-[0_0_15px_-5px_rgba(245,158,11,0.3)]" : "bg-white/5 border border-white/10"
+                                        )}>
                                             {editingPId === p.id ? (
                                                 <div className="flex flex-col gap-2 w-full">
                                                     <div className="flex gap-2">
@@ -785,62 +740,81 @@ const AdminPanel = () => {
                                                         <input
                                                             className={cn(
                                                                 "border rounded px-2 py-1 text-white text-xs w-16 transition-colors",
-                                                                editPRankFixed ? "bg-amber-500/20 border-amber-500/50 text-amber-300" : "bg-black/60 border-white/20"
+                                                                editPRank ? "bg-amber-500/20 border-amber-500/50 text-amber-300" : "bg-black/60 border-white/20"
                                                             )}
                                                             value={editPRank}
-                                                            onChange={(e) => {
-                                                                setEditPRank(e.target.value);
-                                                                setEditPRankFixed(true); // Typing fixes it
-                                                            }}
+                                                            onChange={(e) => setEditPRank(e.target.value)}
                                                             placeholder="Auto"
                                                             type="number"
                                                             min="1"
                                                         />
                                                         <button
-                                                            onClick={() => {
-                                                                setEditPRank('');
-                                                                setEditPRankFixed(false);
-                                                            }}
+                                                            onClick={() => setEditPRank('')}
                                                             className={cn(
                                                                 "text-[10px] px-2 py-1 rounded font-bold transition-all border",
-                                                                !editPRankFixed ? "bg-emerald-500 text-black border-emerald-500" : "bg-transparent text-slate-400 border-white/10 hover:bg-white/5"
+                                                                !editPRank ? "bg-emerald-500 text-black border-emerald-500" : "bg-transparent text-slate-400 border-white/10 hover:bg-white/5"
                                                             )}
                                                         >
                                                             Auto
                                                         </button>
                                                     </div>
                                                     <div className="flex gap-2 mt-1">
-                                                        <button onClick={() => validateAndUpdateParticipant(manageCatId, p.id, editPNumber, editPName, editPRank, editPRankFixed)} className="text-[10px] bg-emerald-600 px-3 py-1 rounded font-bold hover:bg-emerald-500">저장</button>
-                                                        <button onClick={() => setEditingPId(null)} className="text-[10px] bg-slate-600 px-3 py-1 rounded font-bold hover:bg-slate-500">취소</button>
+                                                        <button onClick={() => validateAndUpdateParticipant(manageCatId, p.id, editPNumber, editPName, editPRank)} className="text-[10px] bg-amber-600 px-3 py-1 rounded font-bold hover:bg-amber-500 text-white shadow-[0_0_10px_rgba(217,119,6,0.2)]">순위 확정</button>
+                                                        <button onClick={() => setEditingPId(null)} className="text-[10px] bg-slate-600 px-3 py-1 rounded font-bold hover:bg-slate-500 text-white">취소</button>
                                                     </div>
                                                 </div>
                                             ) : (
                                                 <>
                                                     <div className="flex items-center gap-3">
-                                                        <div className={`w-10 h-10 rounded-lg flex items-center justify-center font-black ${p.isTied ? "bg-amber-500/20 text-amber-500" : "bg-emerald-500/20 text-emerald-400"
-                                                            }`}>{p.number}</div>
+                                                        <div className={cn(
+                                                            "w-10 h-10 rounded-lg flex items-center justify-center font-black transition-colors",
+                                                            p.isTied ? "bg-amber-500/20 text-amber-500 border border-amber-500/30" : "bg-emerald-500/20 text-emerald-400 border border-emerald-500/10"
+                                                        )}>{p.number}</div>
                                                         <div>
                                                             <div className="flex items-center gap-2">
                                                                 <span className="font-bold text-white block">{p.name}</span>
-                                                                {p.isTied && (
-                                                                    <span className="text-[9px] font-black bg-amber-500 text-black px-1.5 py-0.5 rounded animate-pulse">TIE</span>
-                                                                )}
                                                             </div>
-                                                            <div className="flex items-center gap-2 mt-0.5">
-                                                                <span className="text-xs font-black uppercase text-slate-500">Rank</span>
-                                                                <span className="text-lg font-black text-rose-400">{p.rank || '-'}</span>
+                                                            <div className="flex items-center gap-2 mt-1">
+                                                                <span className={cn(
+                                                                    "text-[12px] font-black px-2 py-0.5 rounded border shadow-lg transition-all",
+                                                                    p.isTied
+                                                                        ? "bg-amber-500 text-black border-amber-500 shadow-amber-500/20"
+                                                                        : (Boolean(p.finalRank) ? "bg-amber-500/20 text-amber-500 border-amber-500/30" : "bg-rose-500/20 text-rose-400 border-rose-500/30 shadow-black/20")
+                                                                )}>
+                                                                    R{p.rank}
+                                                                </span>
+                                                                {!!p.isTied && (
+                                                                    <span className="text-[10px] font-black bg-amber-500 text-black px-1.5 py-0.5 rounded animate-pulse">TIE</span>
+                                                                )}
+                                                                {Boolean(p.finalRank && !p.isTied) && (
+                                                                    <span className="text-[8px] bg-amber-500/20 text-amber-500 px-1.5 py-0.5 rounded border border-amber-500/30 font-black uppercase tracking-widest">Fixed</span>
+                                                                )}
                                                             </div>
                                                         </div>
                                                     </div>
-                                                    <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-all">
-                                                        <button onClick={() => {
-                                                            setEditingPId(p.id);
-                                                            setEditPNumber(p.number);
-                                                            setEditPName(p.name);
-                                                            setEditPRank(p.rank || '');
-                                                            setEditPRankFixed(p.rankFixed || false);
-                                                        }} className="p-2 hover:bg-white/10 rounded-lg text-slate-400"><Settings size={14} /></button>
-                                                        <button onClick={() => handleDeleteParticipant(manageCatId, p.id)} className="p-2 hover:bg-rose-500/20 rounded-lg text-rose-400"><Trash2 size={16} /></button>
+                                                    <div className="flex flex-col items-end gap-1">
+                                                        <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-all">
+                                                            <button
+                                                                onClick={() => {
+                                                                    setEditingPId(p.id);
+                                                                    setEditPNumber(p.number);
+                                                                    setEditPName(p.name);
+                                                                    setEditPRank(p.finalRank || '');
+                                                                }}
+                                                                className="p-1.5 hover:bg-white/10 rounded-lg text-slate-400 title='정보 수정 및 순위 확정'"
+                                                            >
+                                                                <Settings size={14} />
+                                                            </button>
+                                                            {p.finalRank && (
+                                                                <button
+                                                                    onClick={() => validateAndUpdateParticipant(manageCatId, p.id, p.number, p.name, null)}
+                                                                    className="p-1.5 hover:bg-amber-500/20 rounded-lg text-amber-400 title='순위 자동화(Reset)'"
+                                                                >
+                                                                    <RefreshCcw size={14} />
+                                                                </button>
+                                                            )}
+                                                            <button onClick={() => handleDeleteParticipant(manageCatId, p.id)} className="p-1.5 hover:bg-rose-500/20 rounded-lg text-rose-400"><Trash2 size={16} /></button>
+                                                        </div>
                                                     </div>
                                                 </>
                                             )}
@@ -875,7 +849,7 @@ const AdminPanel = () => {
                                 <table className="w-full text-left border-collapse min-w-[600px]">
                                     <thead>
                                         <tr className="bg-white/5 text-xs font-black text-slate-400 uppercase tracking-widest border-b border-white/5">
-                                            <th className="px-6 py-5 w-20 text-center">No.</th>
+                                            <th className="px-6 py-5 w-24 text-center">Rank</th>
                                             <th className="px-6 py-5">참가팀</th>
                                             <th className="px-6 py-5">종목</th>
                                         </tr>
@@ -893,17 +867,26 @@ const AdminPanel = () => {
                                                                 </td>
                                                             </tr>
                                                         )}
-                                                        <tr className={`transition-colors ${p.isTied
-                                                            ? "bg-amber-500/5 hover:bg-amber-500/10"
-                                                            : "hover:bg-white/[0.02]"
+                                                        <tr className={`transition - colors ${p.isTied
+                                                                ? "bg-amber-500/5 hover:bg-amber-500/10"
+                                                                : "hover:bg-white/[0.02]"
                                                             }`}>
-                                                            <td className="px-6 py-5 text-center font-black text-slate-600">{index + 1}</td>
+                                                            <td className="px-6 py-5 text-center">
+                                                                <div className="flex flex-col items-center gap-1">
+                                                                    <span className={cn(
+                                                                        "text-[10px] font-black px-1.5 py-0.5 rounded border shadow-sm",
+                                                                        p.isTied ? "bg-amber-500 text-black border-amber-500" : "bg-white/5 text-slate-500 border-white/10"
+                                                                    )}>
+                                                                        R{p.compRank}
+                                                                    </span>
+                                                                </div>
+                                                            </td>
                                                             <td className="px-6 py-5">
                                                                 <div className="flex items-center gap-3">
                                                                     <span className="font-mono text-indigo-400 font-bold bg-indigo-500/10 px-2 py-0.5 rounded text-sm">{p.number}</span>
                                                                     <span className="font-bold text-white">{p.name}</span>
                                                                     {p.isTied && (
-                                                                        <span className="text-[9px] font-black bg-amber-500 text-black px-1.5 py-0.5 rounded animate-pulse ml-2">TIE</span>
+                                                                        <span className="text-[10px] font-black bg-amber-500 text-black px-1.5 py-0.5 rounded animate-pulse ml-2">TIE</span>
                                                                     )}
                                                                 </div>
                                                             </td>
@@ -981,7 +964,7 @@ const AdminPanel = () => {
                                         </button>
                                         <button
                                             onClick={async () => {
-                                                if (confirm(`'${oldCatId}'에 연결된 ${ps.length}명의 참가자를 영구적으로 삭제하시겠습니까?\n이 작업은 되돌릴 수 없습니다.`)) {
+                                                if (confirm(`'${oldCatId}'에 연결된 ${ps.length}명의 참가자를 영구적으로 삭제하시겠습니까 ?\n이 작업은 되돌릴 수 없습니다.`)) {
                                                     // Batch delete for efficiency
                                                     const { doc, writeBatch } = await import('firebase/firestore');
                                                     const { db } = await import('../lib/firebase');
