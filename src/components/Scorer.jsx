@@ -225,6 +225,39 @@ const Scorer = () => {
                 await toggleJudgeSubmission(selectedCategoryId, false);
             } else {
                 // Currently Editing -> Save & Submit
+
+                // 1. 미심사 참가자 확인 로직
+                const missingParticipants = [];
+                categoryParticipants.forEach(p => {
+                    const pScores = localScores[p.id] || {};
+                    let hasMissing = false;
+
+                    sortedItems.forEach(item => {
+                        const isTeamwork = item.label === '팀워크';
+                        const isDisabled = (isSolo && isTeamwork);
+
+                        if (!isDisabled) {
+                            const val = pScores[item.id];
+                            if (val === undefined || val === '' || isNaN(parseFloat(val))) {
+                                hasMissing = true;
+                            }
+                        }
+                    });
+
+                    if (hasMissing) {
+                        missingParticipants.push(p.name);
+                    }
+                });
+
+                // 2. 경고창 노출 (미심사자가 한 명이라도 있는 경우)
+                if (missingParticipants.length > 0) {
+                    const confirmSave = window.confirm("심사를 하지 않은 참가자가 있습니다. 저장하시겠습니까?");
+                    if (!confirmSave) {
+                        setIsSaving(false);
+                        return; // 중단
+                    }
+                }
+
                 console.log('[Scorer] Calling submitCategoryScores');
                 await submitCategoryScores(selectedCategoryId, localScores);
             }
