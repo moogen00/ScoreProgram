@@ -675,7 +675,7 @@ const Scorer = () => {
                                                             const avgScore = getAverageItemScore(p.id, item.id);
                                                             return (
                                                                 <div key={item.id} className="bg-black/20 rounded-lg p-2 border border-white/5 flex flex-col items-center">
-                                                                    <span className="text-xs text-indigo-300 font-bold mb-1 truncate w-full text-center bg-indigo-500/10 px-2 py-0.5 rounded-full">{item.label}</span>
+                                                                    <span className="text-xs text-indigo-300 font-bold mb-1 w-full text-center bg-indigo-500/10 px-2 py-1 rounded-lg leading-tight break-words whitespace-normal">{item.label}</span>
                                                                     <span className={cn("text-lg font-bold tabular-nums", avgScore !== '-' ? "text-indigo-400" : "text-slate-600")}>
                                                                         {avgScore}
                                                                     </span>
@@ -694,7 +694,7 @@ const Scorer = () => {
                                                                 isDisabled && "opacity-30 pointer-events-none",
                                                                 isWarning && "border-rose-500/50 bg-rose-500/10"
                                                             )}>
-                                                                <label className="text-xs text-indigo-300 font-bold mb-1 uppercase tracking-tight truncate w-full text-center bg-indigo-500/10 px-2 py-0.5 rounded-full">
+                                                                <label className="text-xs text-indigo-300 font-bold mb-1 uppercase tracking-tight w-full text-center bg-indigo-500/10 px-2 py-1 rounded-lg leading-tight break-words whitespace-normal">
                                                                     {item.label}
                                                                 </label>
                                                                 <div className={cn(

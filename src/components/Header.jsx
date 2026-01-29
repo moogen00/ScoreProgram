@@ -46,13 +46,19 @@ const Header = ({ onMenuClick, onRequestLogout }) => {
                     </button>
                     <Calendar size={10} className="text-indigo-400/50" />
                     <span>{compName}</span>
-                    <ChevronRight size={10} className="opacity-30" />
-                    <Layers size={10} className="text-indigo-400 shrink-0" />
-                    <span className="text-indigo-400 break-words">{catName}</span>
+                    {!selectedCategoryId && (
+                        <>
+                            <ChevronRight size={10} className="opacity-30" />
+                            <Layers size={10} className="text-indigo-400 shrink-0" />
+                            <span className="text-indigo-400 break-words">{catName}</span>
+                        </>
+                    )}
                 </div>
-                <h2 className="text-sm font-semibold text-white/90 leading-tight">
-                    {catName === 'Dashboard' ? '대시보드 개요' : `현황: ${catName}`}
-                </h2>
+                {!selectedCategoryId && (
+                    <h2 className="text-sm font-semibold text-white/90 leading-tight">
+                        대시보드 개요
+                    </h2>
+                )}
             </div>
 
             <div className="flex items-center gap-6">
