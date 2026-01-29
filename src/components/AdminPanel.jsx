@@ -14,12 +14,12 @@ const AdminPanel = () => {
         scoringItems, addScoringItem, removeScoringItem, updateScoringItemOrder,
         judgesByComp, addJudge, removeJudge, updateJudgeName, anonymizeJudge,
         participants, addParticipant, removeParticipant, updateParticipant, moveParticipants,
-        selectedCategoryId, competitions, scores,
+        selectedCategoryId, activeView, selectedCompId, competitions, scores,
         addCategory, updateCategory, deleteCategory, moveCategory, sortCategoriesByName, toggleCompetitionLock,
         competitionName, setCompetitionName,
         seedRandomScores, clearCompetitionScores,
         exportData, importData, clearAllData, normalizeDatabase, fixLockedProperties,
-        currentUser, syncCompetitionData, syncCategoryScores,
+        currentUser, syncCompetitionData, syncCategoryScores, syncCompetitionScores,
         adminTab, setAdminTab,
         isResetting, resetStatus, isExporting,
         addCompetition, updateCompetition, deleteCompetition,
@@ -73,8 +73,9 @@ const AdminPanel = () => {
     useEffect(() => {
         if (manageCompId) {
             syncCompetitionData(manageCompId);
+            syncCompetitionScores(manageCompId);
         }
-    }, [manageCompId, syncCompetitionData]);
+    }, [manageCompId, syncCompetitionData, syncCompetitionScores]);
 
     // 종목 변경 시 점수 데이터 동기화
     useEffect(() => {

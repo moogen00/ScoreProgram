@@ -13,20 +13,21 @@ const CategoryProgressList = ({ compId }) => {
 
     const getCategoryStats = (catId) => {
         const catPs = participants[catId] || [];
-        const catScores = scores[catId] || {}; // { pId: { judgeEmail: ... } }
 
+        // Count how many judges have officially submitted this category
         let completed = 0;
-        let required = catPs.length * judges.length;
+        let required = judges.length;
 
-        // Count total score entries
-        Object.values(catScores).forEach(pScores => {
-            completed += Object.keys(pScores).length;
+        judges.forEach(judge => {
+            if (judge.submittedCategories?.[catId]) {
+                completed++;
+            }
         });
 
         const progress = required > 0 ? (completed / required) * 100 : 0;
 
         return {
-            progress,
+            progress: Math.min(progress, 100),
             completed,
             required,
             participantCount: catPs.length

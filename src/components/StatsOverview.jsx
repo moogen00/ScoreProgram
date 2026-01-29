@@ -17,22 +17,30 @@ const StatsOverview = ({ compId }) => {
         let totalCompleted = 0;
         let activeJudgeEmails = new Set();
 
-        categories.forEach(cat => {
-            const catScores = scores[cat.id] || {};
-            // catScores 구조: { [pId]: { [judgeEmail]: { ...values } } }
+        // Calculate count of judges who have submitted at least one category OR have scores
+        const activeJudgesCount = judges.filter(j => {
+            const email = j.email.toLowerCase().trim();
+            // Check if judge has marked ANY category in this comp as submitted
+            const isAnySubmitted = Object.values(j.submittedCategories || {}).some(v => v === true);
+            if (isAnySubmitted) return true;
 
-            // 실제 채점된 수 계산
-            Object.values(catScores).forEach(pScores => {
-                Object.keys(pScores).forEach(email => {
-                    activeJudgeEmails.add(email.toLowerCase());
-                    totalCompleted++; // 심사위원 1명의 1개 참가자 채점 = 1 count
-                });
+            // Check if judge has at least one score entry in any category of this comp
+            return categories.some(cat => {
+                const catScores = scores[cat.id] || {};
+                return Object.values(catScores).some(pScores => !!pScores[email]);
+            });
+        }).length;
+
+        categories.forEach(cat => {
+            // Count how many judges have submitted this specific category
+            judges.forEach(judge => {
+                if (judge.submittedCategories?.[cat.id]) {
+                    totalCompleted++;
+                }
             });
 
-            // 필요 총 채점 수 = (참가자 수) * (배정된 심사위원 수)
-            const participantsCount = useStore.getState().participants[cat.id]?.length || 0;
-            const judgesCount = judges.length;
-            totalRequired += participantsCount * judgesCount;
+            // Each category requires all judges to submit
+            totalRequired += judges.length;
         });
 
         // 대회 내 모든 종목 참가자 합계
@@ -44,7 +52,7 @@ const StatsOverview = ({ compId }) => {
 
         return {
             totalJudges: judges.length,
-            activeJudges: activeJudgeEmails.size,
+            activeJudges: activeJudgesCount,
             progress: Math.min(progress, 100),
             completedCount: totalCompleted,
             requiredCount: totalRequired,

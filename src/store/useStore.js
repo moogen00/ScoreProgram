@@ -32,10 +32,11 @@ const useStore = create((set, get) => ({
     competitions: [], // [ { id, name, locked, createdAt, categories: [ { id, name, order } ] } ]
     selectedCategoryId: '',
     activeView: null, // 'admin', 'leaderboard', 'scorer', null
+    selectedCompId: '', // Currently selected competition for dashboard/admin
     scoringItems: [],
-    judgesByComp: {}, // { [compId]: [ { email, name } ] }
-    participants: {}, // { [categoryId]: [ { id, number, name } ] }
-    scores: {}, // { [categoryId]: { [participantId]: { [judgeEmail]: { [scoringItemId]: score } } } }
+    judgesByComp: {}, // { compId: [judgeObjs] }
+    participants: {}, // { catId: [participantObjs] }
+    scores: {}, // { catId: { pId: { email: values } } }
 
     adminTab: 'scoring',
 
@@ -239,6 +240,15 @@ const useStore = create((set, get) => ({
             adminTab: tab
         }, '');
     },
+
+    setSelectedCompId: (id) => {
+        set({ selectedCompId: id });
+        if (id) {
+            localStorage.setItem('score_program_selected_comp_id', id);
+        } else {
+            localStorage.removeItem('score_program_selected_comp_id');
+        }
+    },
     // 네비게이션 상태 초기화
     resetNavigation: () => {
         set({ activeView: null, selectedCategoryId: '', adminTab: 'scoring' });
@@ -341,7 +351,6 @@ const useStore = create((set, get) => ({
                 competition: compName,
                 genre: genre,
                 category: category,
-                categoryId,
                 categoryId,
                 participantId: pId,
                 participantName: pName,
@@ -1250,21 +1259,29 @@ const useStore = create((set, get) => ({
 
     // 종목 내 모든 참가자의 순위 재계산 및 업데이트 (제출 시 호출용)
     updateCategoryRanks: async (categoryId) => {
-        const { participants, scores } = get();
+        const { participants, scores, judgesByComp, competitions } = get();
         const pList = participants[categoryId] || [];
         const catScores = scores[categoryId] || {};
 
         if (pList.length === 0) return;
 
+        // Get compId for this category
+        const comp = competitions.find(c => c.categories?.some(cat => cat.id === categoryId));
+        const compId = comp?.id;
+        const judges = judgesByComp[compId] || [];
+        const activeJudgeEmails = judges.map(j => j.email.toLowerCase().trim());
+
         // 1. 각 참가자별 평균 점수 계산 (심사위원별 총점의 평균)
         const scored = pList.map(p => {
             const pScores = catScores[p.id] || {};
-            const judgeEmails = Object.keys(pScores);
-            const judgeCount = judgeEmails.length;
+            // Filter scores to only include those from active judges
+            const activeJudgeScores = Object.entries(pScores).filter(([email]) =>
+                activeJudgeEmails.includes(email.toLowerCase().trim())
+            );
+            const judgeCount = activeJudgeScores.length;
 
             // 모든 심사위원의 총점 합계 계산
-            const totalSum = judgeEmails.reduce((acc, email) => {
-                const itemScores = pScores[email] || {};
+            const totalSum = activeJudgeScores.reduce((acc, [, itemScores]) => {
                 // 한 심사위원의 항목별 점수 합계
                 const judgeTotal = Object.values(itemScores).reduce((sum, val) => {
                     const num = parseFloat(val);
@@ -1407,15 +1424,19 @@ const useStore = create((set, get) => ({
     // Firebase Initialization & Sync (Optimized for Quota)
     // Subscription handles
     unsubScores: null,
+    unsubCompScores: null, // Subscriptions for competition-wide score sync
     unsubParticipants: null,
     unsubJudges: null,
     currentSyncedCompId: null, // Track current competition sync
+    currentSyncedCompScoresId: null, // Track current competition scores sync
     currentSyncedCatId: null,  // Track current category score sync
 
     // 1. Competition-level Sync: Judges & Participants
     syncCompetitionData: (compId) => {
         const { unsubParticipants, unsubJudges, currentSyncedCompId } = get();
-        if (currentSyncedCompId === compId) return;
+
+        // Allow re-sync if ID matches but listeners are missing (e.g. categories loaded later)
+        if (currentSyncedCompId === compId && unsubParticipants) return;
 
         console.log(`[Sync] Switching Competition Data sync to: ${compId}`);
 
@@ -1527,6 +1548,65 @@ const useStore = create((set, get) => ({
         });
     },
 
+    // 2.1 Competition-level Score Sync (Direct score sync for all categories in a competition)
+    syncCompetitionScores: (compId) => {
+        const { unsubCompScores, currentSyncedCompScoresId, competitions } = get();
+        const comp = competitions.find(c => c.id === compId);
+        const catIds = (comp?.categories || []).map(c => c.id);
+
+        if (currentSyncedCompScoresId === compId && unsubCompScores && catIds.length > 0) return;
+
+        console.log(`[Sync] Switching Competition Score sync to: ${compId}`);
+        if (unsubCompScores) unsubCompScores();
+
+        if (catIds.length === 0) {
+            set({ unsubCompScores: null, currentSyncedCompScoresId: compId });
+            return;
+        }
+
+        // Firestore 'in' limit is 30.
+        const chunks = [];
+        for (let i = 0; i < catIds.length; i += 30) {
+            chunks.push(catIds.slice(i, i + 30));
+        }
+
+        const unsubs = chunks.map(chunk => {
+            const qScores = query(collection(db, 'scores'), where('categoryId', 'in', chunk));
+            return onSnapshot(qScores, (snapshot) => {
+                set(state => {
+                    // Optimized deep-ish copy to avoid mutation
+                    const newScores = { ...state.scores };
+                    snapshot.docs.forEach(docSnap => {
+                        const s = docSnap.data();
+                        const catId = s.categoryId;
+                        const pId = s.participantId;
+                        const email = (s.judgeEmail || '').toLowerCase().trim();
+
+                        if (!newScores[catId]) {
+                            newScores[catId] = {};
+                        } else {
+                            newScores[catId] = { ...newScores[catId] };
+                        }
+
+                        if (!newScores[catId][pId]) {
+                            newScores[catId][pId] = {};
+                        } else {
+                            newScores[catId][pId] = { ...newScores[catId][pId] };
+                        }
+
+                        newScores[catId][pId][email] = s.values;
+                    });
+                    return { scores: newScores };
+                });
+            }, (error) => console.error('[Sync] Competition Scores sync error:', error));
+        });
+
+        set({
+            unsubCompScores: () => unsubs.forEach(u => u()),
+            currentSyncedCompScoresId: compId
+        });
+    },
+
     // Legacy refresh (can be removed or kept as proxy)
     refreshScores: () => {
         const { selectedCategoryId } = get();
@@ -1557,6 +1637,12 @@ const useStore = create((set, get) => ({
                 console.error('[Auth] Failed to restore session', e);
                 localStorage.removeItem('score_program_user');
             }
+        }
+
+        // Restore selected competition
+        const savedCompId = localStorage.getItem('score_program_selected_comp_id');
+        if (savedCompId) {
+            set({ selectedCompId: savedCompId });
         }
 
         // 1. Sync Global/Metadata Collections (Small read count)

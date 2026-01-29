@@ -5,16 +5,32 @@ import StatsOverview from './StatsOverview';
 import CategoryProgressList from './CategoryProgressList';
 
 const Dashboard = () => {
-    const { competitions, currentUser } = useStore();
-    const [selectedCompId, setSelectedCompId] = React.useState('');
+    const { competitions, currentUser, selectedCompId, setSelectedCompId, syncCompetitionData, syncCompetitionScores } = useStore();
 
     const isAdmin = currentUser?.role === 'ADMIN' || currentUser?.role === 'ROOT_ADMIN';
 
+    // 1. Initial Selection & Persistence Validation
     React.useEffect(() => {
-        if (!selectedCompId && competitions.length > 0) {
-            setSelectedCompId(competitions[0].id);
+        if (competitions.length > 0 && selectedCompId) {
+            const exists = competitions.some(c => c.id === selectedCompId);
+            if (!exists) {
+                console.log(`[Dashboard] Selected competition ${selectedCompId} no longer exists. Clearing selection.`);
+                setSelectedCompId('');
+            }
         }
-    }, [competitions, selectedCompId]);
+    }, [competitions, selectedCompId, setSelectedCompId]);
+
+    // 2. Real-time Synchronization Trigger
+    const managedComp = competitions.find(c => c.id === selectedCompId);
+    const categoryCount = managedComp?.categories?.length || 0;
+
+    React.useEffect(() => {
+        if (selectedCompId && isAdmin && categoryCount > 0) {
+            console.log(`[Dashboard] Triggering sync for competition: ${selectedCompId} (${categoryCount} categories)`);
+            syncCompetitionData(selectedCompId);
+            syncCompetitionScores(selectedCompId);
+        }
+    }, [selectedCompId, isAdmin, categoryCount, syncCompetitionData, syncCompetitionScores]);
 
     return (
         <div className="max-w-7xl mx-auto min-h-[70vh] p-4 md:p-12">
@@ -48,8 +64,9 @@ const Dashboard = () => {
                         <select
                             value={selectedCompId}
                             onChange={(e) => setSelectedCompId(e.target.value)}
-                            className="w-full md:w-auto md:min-w-[12rem] bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white outline-none focus:ring-2 focus:ring-indigo-500/50 font-bold"
+                            className="w-full md:w-auto md:min-w-[12rem] bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white outline-none focus:ring-2 focus:ring-indigo-500/50 font-bold appearance-none cursor-pointer"
                         >
+                            <option value="" className="text-slate-500">대회를 선택해 주세요...</option>
                             {competitions.map(y => (
                                 <option key={y.id} value={y.id} className="text-black">{y.name}</option>
                             ))}
@@ -79,8 +96,12 @@ const Dashboard = () => {
                         </motion.div>
                     </div>
                 ) : (
-                    <div className="text-center py-20 opacity-50">
-                        <p className="text-white">등록된 대회가 없습니다.</p>
+                    <div className="text-center py-20 opacity-50 bg-white/5 rounded-2xl border-2 border-dashed border-white/5">
+                        <p className="text-slate-400 font-bold uppercase tracking-widest text-sm">
+                            {competitions.length > 0
+                                ? '상단에서 분석할 대회를 선택해 주세요'
+                                : '등록된 대회가 없습니다'}
+                        </p>
                     </div>
                 )
             ) : (
