@@ -8,6 +8,93 @@ function cn(...inputs) {
     return twMerge(clsx(inputs));
 }
 
+const SmartScoreInput = ({ value, onChange, disabled, isActive }) => {
+    // Use local state for immediate typing responsiveness
+    const [localValue, setLocalValue] = useState(value || '');
+
+    useEffect(() => {
+        setLocalValue(value || '');
+    }, [value]);
+
+    const handleInputChange = (e) => {
+        let val = e.target.value.replace(/[^0-9.]/g, '');
+
+        // 1. Handle Empty
+        if (val === '') {
+            setLocalValue('');
+            onChange('');
+            return;
+        }
+
+        // 2. First Char Lock (5-9 only)
+        if (val.length === 1 && !/[5-9]/.test(val)) return;
+
+        // 3. Smart Format (Two digits -> Auto Dot)
+        if (val.length === 2 && !val.includes('.')) {
+            const first = val[0];
+            const second = val[1];
+
+            // If starting with 5, second must be >= 5 to ensure >= 5.5
+            if (first === '5' && parseInt(second) < 5) return;
+
+            val = `${first}.${second}`;
+        }
+
+        // 4. Format & Length Enforcement (X.Y)
+        if (val.length > 3) val = val.slice(0, 3);
+
+        // Regex: Must start with 5-9, optional dot, optional digit
+        if (!/^[5-9]\.?[0-9]?$/.test(val)) return;
+
+        setLocalValue(val);
+        // We propagate immediately so Total Score updates in header,
+        // but it might be "5" (invalid). The isWarning logic in CSS handles this.
+        onChange(val);
+    };
+
+    const handleBlur = () => {
+        if (localValue === '') return;
+
+        const num = parseFloat(localValue);
+        if (isNaN(num) || num < 5.5) {
+            setLocalValue('5.5');
+            onChange('5.5');
+        } else if (num > 9.9) {
+            setLocalValue('9.9');
+            onChange('9.9');
+        } else if (localValue.length === 1) {
+            // Auto-complete single digit (e.g., "7" -> "7.5" or "7.0"?)
+            // Usually, if they type one digit and leave, let's assume .5 or .0.
+            // User asked for "55 -> 5.5", so let's stick to explicit completion or .5 as a safe bet.
+            // But if they just type "5" and leave, the rule says 5.5 min.
+            const autoVal = num === 5 ? "5.5" : `${localValue}.0`;
+            setLocalValue(autoVal);
+            onChange(autoVal);
+        }
+    };
+
+    const isInvalid = localValue !== '' && (parseFloat(localValue) < 5.5 || localValue.endsWith('.'));
+
+    return (
+        <input
+            type="text"
+            inputMode="decimal"
+            disabled={disabled}
+            value={localValue}
+            onChange={handleInputChange}
+            onBlur={handleBlur}
+            onWheel={(e) => e.target.blur()}
+            className={cn(
+                "w-full h-full bg-transparent text-center font-mono font-bold text-lg outline-none placeholder-white/20 transition-all",
+                isActive ? "text-indigo-400" : "text-white/40",
+                disabled ? "cursor-not-allowed opacity-50" : "focus:text-indigo-400",
+                isInvalid && "text-rose-400"
+            )}
+            placeholder="-"
+        />
+    );
+};
+
 const Scorer = () => {
     const { scoringItems: globalScoringItems, updateScore, submitCategoryScores, toggleJudgeSubmission, selectedCategoryId, scores, participants, currentUser, competitions, judgesByComp, isInitialSyncComplete } = useStore();
 
@@ -108,25 +195,9 @@ const Scorer = () => {
         });
     }, [selectedCategoryId, currentUser, scores, categoryParticipants, userEmail]);
 
-    // 점수 입력 핸들러 (실시간 입력 제한 및 로컬 상태 업데이트)
+    // 점수 입력 핸들러 (로컬 상태 업데이트)
     const handleScoreChange = (participantId, itemId, val) => {
         if (isLocked) return;
-
-        // 빈 값 처리 (지우기 허용)
-        if (val === '') {
-            setLocalScores(prev => ({
-                ...prev,
-                [participantId]: { ...prev[participantId], [itemId]: '' }
-            }));
-            return;
-        }
-
-        // 입력 제한 정규식: 숫자만 허용, 소수점은 최대 1자리까지만 허용
-        if (!/^\d*\.?\d{0,1}$/.test(val)) return;
-
-        let num = parseFloat(val);
-        if (isNaN(num)) return;
-        if (num > 9.9) num = 9.9;
 
         setLocalScores(prev => ({
             ...prev,
@@ -582,23 +653,11 @@ const Scorer = () => {
                                                                         isLocked && "opacity-40 grayscale-[0.5]",
                                                                         isWarning && "border-rose-500/50 bg-rose-500/10"
                                                                     )}>
-                                                                        <input
-                                                                            type="number"
-                                                                            inputMode="decimal"
-                                                                            step="0.1"
-                                                                            min="5.5"
-                                                                            max="9.9"
+                                                                        <SmartScoreInput
                                                                             disabled={isLocked}
                                                                             value={localScores[p.id]?.[item.id] ?? ''}
-                                                                            onChange={(e) => handleScoreChange(p.id, item.id, e.target.value)}
-                                                                            onWheel={(e) => e.target.blur()}
-                                                                            className={cn(
-                                                                                "w-full h-full bg-transparent text-center font-mono font-bold text-lg outline-none placeholder-white/10",
-                                                                                isActive ? "text-indigo-400" : "text-white",
-                                                                                isLocked ? "cursor-not-allowed" : "focus:text-indigo-400",
-                                                                                isWarning && "text-rose-400 focus:text-rose-400"
-                                                                            )}
-                                                                            placeholder="-"
+                                                                            onChange={(val) => handleScoreChange(p.id, item.id, val)}
+                                                                            isActive={isActive}
                                                                         />
                                                                         {isLocked && (
                                                                             <Lock size={10} className="absolute bottom-1 right-1 text-slate-500" />
@@ -708,25 +767,14 @@ const Scorer = () => {
                                                                 {isDisabled ? (
                                                                     <span className="text-slate-600 font-bold py-2">-</span>
                                                                 ) : (
-                                                                    <div className="w-full relative">
-                                                                        <input
-                                                                            type="number"
-                                                                            inputMode="decimal"
-                                                                            step="0.1"
-                                                                            min="5.5"
-                                                                            max="9.9"
+                                                                    <div className="w-full relative h-10">
+                                                                        <SmartScoreInput
                                                                             disabled={isLocked}
                                                                             value={localScores[p.id]?.[item.id] ?? ''}
-                                                                            onChange={(e) => handleScoreChange(p.id, item.id, e.target.value)}
-                                                                            onWheel={(e) => e.target.blur()}
-                                                                            className={cn(
-                                                                                "w-full bg-transparent text-center font-mono font-black text-2xl outline-none py-1",
-                                                                                isActive ? "text-indigo-400" : "text-white",
-                                                                                isLocked ? "cursor-not-allowed" : "focus:text-indigo-400"
-                                                                            )}
-                                                                            placeholder="-"
+                                                                            onChange={(val) => handleScoreChange(p.id, item.id, val)}
+                                                                            isActive={isActive}
                                                                         />
-                                                                        {isLocked && <Lock size={12} className="absolute bottom-2 right-2 text-slate-500" />}
+                                                                        {isLocked && <Lock size={12} className="absolute bottom-1 right-1 text-slate-500" />}
                                                                     </div>
                                                                 )}
                                                             </div>
