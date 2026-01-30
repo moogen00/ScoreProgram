@@ -1271,18 +1271,13 @@ const useStore = create((set, get) => ({
         const judges = judgesByComp[compId] || [];
         const activeJudgeEmails = judges.map(j => j.email.toLowerCase().trim());
 
-        // 1. 각 참가자별 평균 점수 계산 (심사위원별 총점의 평균)
+        // 1. 각 참가자별 평균 점수 계산 (전체 등록된 심사위원 기준)
         const scored = pList.map(p => {
             const pScores = catScores[p.id] || {};
-            // Filter scores to only include those from active judges
-            const activeJudgeScores = Object.entries(pScores).filter(([email]) =>
-                activeJudgeEmails.includes(email.toLowerCase().trim())
-            );
-            const judgeCount = activeJudgeScores.length;
 
-            // 모든 심사위원의 총점 합계 계산
-            const totalSum = activeJudgeScores.reduce((acc, [, itemScores]) => {
-                // 한 심사위원의 항목별 점수 합계
+            // 등록된 전체 심사위원 목록을 기준으로 계산
+            const totalSum = activeJudgeEmails.reduce((acc, email) => {
+                const itemScores = pScores[email] || {};
                 const judgeTotal = Object.values(itemScores).reduce((sum, val) => {
                     const num = parseFloat(val);
                     return isNaN(num) ? sum : sum + num;
@@ -1290,6 +1285,8 @@ const useStore = create((set, get) => ({
                 return acc + judgeTotal;
             }, 0);
 
+            // 분모를 '실제 채점한 심사위원 수'가 아닌 '등록된 전체 심사위원 수'로 설정
+            const judgeCount = activeJudgeEmails.length;
             const average = judgeCount > 0 ? totalSum / judgeCount : 0;
             return { ...p, average };
         });

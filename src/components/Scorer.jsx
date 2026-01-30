@@ -285,58 +285,55 @@ const Scorer = () => {
     // 참가자 총점 조회 (관리자/관중 vs 심사위원 분기 처리)
     // - 관리자/관중(Locked): 모든 심사위원 평균 합산
     // - 심사위원: 본인의 점수 합산
+    // 참가자 총점 조회 (관리자/관중 vs 심사위원 분기 처리)
+    // - 관리자/관중(Locked): 모든 심사위원 평균 합산
+    // - 심사위원: 본인의 점수 합산
     const getParticipantTotal = useCallback((pId) => {
-        // Condition: Admin (Monitoring) OR Spectator (Locked) OR Admin (Locked - rare)
-        // Basically if we are showing averages, we calculate total from averages.
+        const compJudges = judgesByComp?.[currentCompId] || [];
+        const judgeCount = compJudges.length;
+
         if ((isAdmin && !isJudgeForThisComp) || (isSpectator && isLocked)) {
-            // Calculate Average Total from all judges
+            // Calculate Average Total from all REGISTRED judges
             const pScoresByJudge = scores[selectedCategoryId]?.[pId] || {};
-            const judgeEmails = Object.keys(pScoresByJudge);
-            if (judgeEmails.length === 0) return 0;
 
             let sumOfTotals = 0;
-            judgeEmails.forEach(email => {
+            // 등록된 심사위원들의 점수만 합산
+            compJudges.forEach(judge => {
+                const email = judge.email.toLowerCase().trim();
                 const vals = pScoresByJudge[email] || {};
                 const judgeTotal = Object.values(vals).reduce((s, v) => s + (parseFloat(v) || 0), 0);
                 sumOfTotals += judgeTotal;
             });
-            return parseFloat((sumOfTotals / judgeEmails.length).toFixed(2));
+
+            // 분모를 등록된 전체 심사위원 수로 설정
+            return judgeCount > 0 ? parseFloat((sumOfTotals / judgeCount).toFixed(2)) : 0;
         } else {
             // Judge: Use local/own total
             return parseFloat(calculateTotal(pId));
         }
-    }, [isAdmin, isSpectator, isLocked, isJudgeForThisComp, scores, selectedCategoryId, calculateTotal]);
+    }, [isAdmin, isSpectator, isLocked, isJudgeForThisComp, scores, selectedCategoryId, calculateTotal, currentCompId, judgesByComp]);
 
+    // 관리자용 세부 통계 계산 (항목별 평균 및 심사위원별 점수 내역)
     // 관리자용 세부 통계 계산 (항목별 평균 및 심사위원별 점수 내역)
     const getAdminItemStats = useCallback((pId, itemId) => {
         const pScoresByJudge = scores[selectedCategoryId]?.[pId] || {};
         const compJudges = judgesByComp?.[currentCompId] || [];
-        const judgeEmails = Object.keys(pScoresByJudge);
         const stats = { avg: 0, breakdown: [] };
 
-        if (judgeEmails.length === 0) return stats;
+        const judgeCount = compJudges.length;
+        if (judgeCount === 0) return stats;
 
         let sum = 0;
-        let count = 0;
-        judgeEmails.forEach(email => {
+        compJudges.forEach(judge => {
+            const email = judge.email.toLowerCase().trim();
             const val = pScoresByJudge[email]?.[itemId];
-            if (val !== undefined) {
-                const num = parseFloat(val);
-                sum += num;
-                count++;
+            const num = val !== undefined ? parseFloat(val) : 0;
 
-                // Find judge name
-                let judgeName = email.split('@')[0];
-                const judgeObj = compJudges.find(j => j.email === email);
-                if (judgeObj) judgeName = judgeObj.name;
-
-                stats.breakdown.push({ name: judgeName, score: num });
-            }
+            sum += num;
+            stats.breakdown.push({ name: judge.name, score: num, hasScored: val !== undefined });
         });
 
-        if (count > 0) {
-            stats.avg = sum / count;
-        }
+        stats.avg = sum / judgeCount;
         return stats;
     }, [scores, selectedCategoryId, judgesByComp, currentCompId]);
 

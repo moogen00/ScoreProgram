@@ -19,39 +19,59 @@ const Leaderboard = () => {
     const categoryParticipants = participants[selectedCategoryId] || [];
     const categoryScores = scores[selectedCategoryId] || {};
 
+    // 현재 대회의 전체 등록된 심사위원 목록 가져오기
+    const currentComp = useStore((state) =>
+        state.competitions.find(c => c.categories?.some(cat => cat.id === selectedCategoryId))
+    );
+    const registeredJudges = (currentComp && useStore.getState().judgesByComp[currentComp.id]) || [];
+
+    // 심사위원 J1, J2 ... 매핑 (등록된 전체 심사위원 기준)
+    const judgeMap = useMemo(() => {
+        const map = {};
+        [...registeredJudges]
+            .sort((a, b) => (a.email || '').localeCompare(b.email || ''))
+            .forEach((judge, idx) => {
+                map[judge.email] = `J${idx + 1}`;
+            });
+        return map;
+    }, [registeredJudges]);
+
+    const sortedJudges = useMemo(() =>
+        Object.entries(judgeMap).sort((a, b) => a[1].localeCompare(b[1], undefined, { numeric: true })),
+        [judgeMap]
+    );
+
+    const totalRegisteredJudgesCount = registeredJudges.length;
+
     // 채점된 심사위원 목록 추출 (J1, J2 등으로 매핑하기 위함)
     const scoredJudges = new Set();
     Object.values(categoryScores).forEach(pScores => {
         Object.keys(pScores).forEach(jEmail => scoredJudges.add(jEmail));
     });
 
-    // 심사위원 이메일 정렬 후 J1, J2 ... 매핑
-    const judgeMap = {};
-    Array.from(scoredJudges).sort().forEach((email, idx) => {
-        judgeMap[email] = `J${idx + 1}`;
-    });
-
-    const sortedJudges = Object.entries(judgeMap).sort((a, b) => a[1].localeCompare(b[1]));
-
     // 리더보드 데이터 계산 (참가자별 총점, 평균, 순위)
     const leaderboardData = useMemo(() => {
         const scored = categoryParticipants.map(p => {
             const pScores = categoryScores[p.id] || {};
             let totalSum = 0;
+            let judgeCount = 0;
             const judgeBreakdown = {};
-            const judgeEmails = Object.keys(pScores);
-            const judgeCount = judgeEmails.length;
 
-            // 참가자의 심사위원별 점수 합산
-            judgeEmails.forEach(jEmail => {
-                const itemScores = pScores[jEmail] || {};
-                const jTotal = Object.values(itemScores).reduce((a, b) => a + b, 0);
-                judgeBreakdown[judgeMap[jEmail]] = jTotal;
-                totalSum += jTotal;
+            // 각 심사위원의 총점 계산
+            Object.entries(pScores).forEach(([judgeEmail, scoresByItem]) => {
+                const judgeTotal = Object.values(scoresByItem).reduce((acc, score) => acc + score, 0);
+                if (judgeTotal > 0) { // 점수가 있는 심사위원만 합산
+                    totalSum += judgeTotal;
+                    judgeCount++;
+                }
+                // judgeMap에 있는 심사위원만 breakdown에 포함
+                if (judgeMap[judgeEmail]) {
+                    judgeBreakdown[judgeMap[judgeEmail]] = judgeTotal;
+                }
             });
 
-            // 평균 계산
-            const average = judgeCount > 0 ? totalSum / judgeCount : 0;
+            // 평균 계산 (등록된 전체 심사위원 수 기준)
+            const average = totalRegisteredJudgesCount > 0 ? totalSum / totalRegisteredJudgesCount : 0;
             return { ...p, totalSum, average, judgeCount, judgeBreakdown, pScores };
         }).sort((a, b) => { // 수동 확정 순위(finalRank) 및 자동 순위 우선 정렬
             const rA = a.finalRank || a.calculatedRank || 9999;
