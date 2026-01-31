@@ -1021,43 +1021,45 @@ const AdminPanel = () => {
                                     <button type="submit" className="bg-amber-600 hover:bg-amber-500 text-white py-3 rounded-xl font-bold flex items-center justify-center gap-2 transition-all hover:scale-[1.02]"><Shield size={20} /> 권한 부여</button>
                                 </form>
                                 <div className="space-y-3">
-                                    {(judgesByComp[manageCompId] || []).map(j => (
-                                        <div key={j.email} className="flex items-center justify-between p-4 bg-white/5 border border-white/10 rounded-xl group">
-                                            <div className="flex items-center gap-4 flex-1">
-                                                <div className="w-10 h-10 rounded-full bg-amber-500/20 text-amber-500 flex items-center justify-center shrink-0"><Shield size={20} /></div>
-                                                {editingJudgeEmail === j.email ? (
-                                                    <div className="flex items-center gap-2 flex-1 mr-4">
-                                                        <input
-                                                            autoFocus
-                                                            className="bg-black/60 border border-white/20 rounded px-2 py-1 text-white font-bold w-full outline-none"
-                                                            value={tempJudgeName}
-                                                            onChange={(e) => setTempJudgeName(e.target.value)}
-                                                            onKeyDown={(e) => e.key === 'Enter' && handleUpdateJudgeName(manageCompId, j.email)}
-                                                        />
-                                                        <button onClick={() => handleUpdateJudgeName(manageCompId, j.email)} className="p-1.5 bg-emerald-500/20 text-emerald-400 rounded-lg hover:bg-emerald-500/30"><Check size={16} /></button>
-                                                        <button onClick={() => setEditingJudgeEmail(null)} className="p-1.5 bg-slate-500/20 text-slate-400 rounded-lg hover:bg-slate-500/30"><X size={16} /></button>
+                                    {(judgesByComp[manageCompId] || [])
+                                        .sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }))
+                                        .map(j => (
+                                            <div key={j.email} className="flex items-center justify-between p-4 bg-white/5 border border-white/10 rounded-xl group">
+                                                <div className="flex items-center gap-4 flex-1">
+                                                    <div className="w-10 h-10 rounded-full bg-amber-500/20 text-amber-500 flex items-center justify-center shrink-0"><Shield size={20} /></div>
+                                                    {editingJudgeEmail === j.email ? (
+                                                        <div className="flex items-center gap-2 flex-1 mr-4">
+                                                            <input
+                                                                autoFocus
+                                                                className="bg-black/60 border border-white/20 rounded px-2 py-1 text-white font-bold w-full outline-none"
+                                                                value={tempJudgeName}
+                                                                onChange={(e) => setTempJudgeName(e.target.value)}
+                                                                onKeyDown={(e) => e.key === 'Enter' && handleUpdateJudgeName(manageCompId, j.email)}
+                                                            />
+                                                            <button onClick={() => handleUpdateJudgeName(manageCompId, j.email)} className="p-1.5 bg-emerald-500/20 text-emerald-400 rounded-lg hover:bg-emerald-500/30"><Check size={16} /></button>
+                                                            <button onClick={() => setEditingJudgeEmail(null)} className="p-1.5 bg-slate-500/20 text-slate-400 rounded-lg hover:bg-slate-500/30"><X size={16} /></button>
+                                                        </div>
+                                                    ) : (
+                                                        <div><p className="font-bold text-white">{j.name}</p><p className="text-xs text-slate-500">{j.email}</p></div>
+                                                    )}
+                                                </div>
+                                                {!editingJudgeEmail && (
+                                                    <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-all">
+                                                        <button
+                                                            onClick={() => {
+                                                                setEditingJudgeEmail(j.email);
+                                                                setTempJudgeName(j.name);
+                                                            }}
+                                                            className="p-2 hover:bg-white/10 rounded-lg text-slate-400 hover:text-white"
+                                                            title="이름 수정"
+                                                        >
+                                                            <Edit2 size={16} />
+                                                        </button>
+                                                        <button onClick={() => handleDeleteJudge(manageCompId, j.email, j.name)} className="p-2 hover:bg-rose-500/20 rounded-lg text-rose-400"><Trash2 size={18} /></button>
                                                     </div>
-                                                ) : (
-                                                    <div><p className="font-bold text-white">{j.name}</p><p className="text-xs text-slate-500">{j.email}</p></div>
                                                 )}
                                             </div>
-                                            {!editingJudgeEmail && (
-                                                <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-all">
-                                                    <button
-                                                        onClick={() => {
-                                                            setEditingJudgeEmail(j.email);
-                                                            setTempJudgeName(j.name);
-                                                        }}
-                                                        className="p-2 hover:bg-white/10 rounded-lg text-slate-400 hover:text-white"
-                                                        title="이름 수정"
-                                                    >
-                                                        <Edit2 size={16} />
-                                                    </button>
-                                                    <button onClick={() => handleDeleteJudge(manageCompId, j.email, j.name)} className="p-2 hover:bg-rose-500/20 rounded-lg text-rose-400"><Trash2 size={18} /></button>
-                                                </div>
-                                            )}
-                                        </div>
-                                    ))}
+                                        ))}
                                 </div>
                             </>
                         ) : (
