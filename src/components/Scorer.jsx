@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { PenTool, Lock, Save, AlertCircle, Medal, Users } from 'lucide-react';
 import useStore from '../store/useStore';
 import { clsx } from 'clsx';
@@ -158,41 +158,37 @@ const Scorer = () => {
     // 스토어 점수와 로컬 입력 상태 동기화 (초기 진입 시 및 카테고리 변경 시에만)
     // 문제 해결: 다른 심사위원이 점수를 제출해서 'scores'가 업데이트될 때,
     // 내 로컬 입력값(localScores)이 덮어씌워지는 것을 방지해야 함.
+    const prevCategoryId = useRef(selectedCategoryId);
+
     useEffect(() => {
         if (!selectedCategoryId || !currentUser) return;
 
-        // 이미 로컬 상태가 있고, 카테고리가 변경된 게 아니라면 (즉, 단순 점수 업데이트라면)
-        // 로컬 상태를 유지하여 입력 중인 데이터 보호
         setLocalScores(prev => {
-            const isNewCategory = Object.keys(prev).length === 0;
-            // *더 정확한 체크 필요: categoryId가 바뀌었을 때만 리셋해야 함.
-            // 하지만 useEffect 의존성에 selectedCategoryId가 있으므로, 
-            // 여기서는 '서버 데이터'와 '로컬 데이터'를 병합하는 전략이 안전함.
+            // Check if category changed
+            const isCategoryChanged = prevCategoryId.current !== selectedCategoryId;
 
-            const newScores = { ...prev };
+            // If category changed, reset local state completely. 
+            // If not changed, keep previous state to preserve unsaved inputs.
+            const baseScores = isCategoryChanged ? {} : { ...prev };
+
             categoryParticipants.forEach(p => {
                 const serverScores = scores[selectedCategoryId]?.[p.id]?.[userEmail] || {};
 
-                // 로컬에 값이 없으면 서버 값으로 채움 (초기 로딩)
-                // 로컬에 값이 있어도, 서버 값이 '더 최신'일 수 있으나...
-                // 실시간 입력 중에는 로컬 값이 우선이어야 함. 
-                // 따라서 '로컬에 키가 없을 때만' 서버 값을 가져오거나, 
-                // 아예 초기 로딩(빈 상태)일 때만 가져오도록 함.
-                if (!newScores[p.id]) {
-                    newScores[p.id] = { ...serverScores };
+                if (!baseScores[p.id]) {
+                    baseScores[p.id] = { ...serverScores };
                 } else {
-                    // 이미 p.id에 대한 로컬 객체가 있는 경우
-                    // 비어있는 필드만 서버 데이터로 채워넣기 (Merge)
-                    // (또는 아예 건드리지 않기 - 입력 안전성 최우선)
                     Object.entries(serverScores).forEach(([k, v]) => {
-                        if (newScores[p.id][k] === undefined || newScores[p.id][k] === '') {
-                            newScores[p.id][k] = v;
+                        if (baseScores[p.id][k] === undefined || baseScores[p.id][k] === '') {
+                            baseScores[p.id][k] = v;
                         }
                     });
                 }
             });
-            return newScores;
+            return baseScores;
         });
+
+        // Update ref after processing
+        prevCategoryId.current = selectedCategoryId;
     }, [selectedCategoryId, currentUser, scores, categoryParticipants, userEmail]);
 
     // 점수 입력 핸들러 (로컬 상태 업데이트)

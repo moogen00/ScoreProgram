@@ -342,7 +342,15 @@ const useStore = create((set, get) => ({
         let opCount = 0;
         for (const [pId, values] of Object.entries(scoresMap)) {
             const pObj = currentParticipants.find(p => p.id === pId);
-            const pName = pObj ? pObj.name : '';
+
+            // Critical Fix: Skip if participant is not in the current category list
+            // This prevents "Zombie Scores" from previous categories from being saved
+            if (!pObj) {
+                console.warn(`[Store] Skipping orphan score for pId=${pId} in category=${categoryId}`);
+                continue;
+            }
+
+            const pName = pObj.name;
 
             const docId = `${categoryId}_${pId}_${email}`;
             const scoreRef = doc(db, 'scores', docId);
