@@ -29,7 +29,7 @@ const Leaderboard = () => {
     const judgeMap = useMemo(() => {
         const map = {};
         [...registeredJudges]
-            .sort((a, b) => (a.email || '').localeCompare(b.email || ''))
+            .sort((a, b) => (a.name || '').localeCompare(b.name || '', undefined, { numeric: true }))
             .forEach((judge, idx) => {
                 map[judge.email] = `J${idx + 1}`;
             });
@@ -114,7 +114,9 @@ const Leaderboard = () => {
                                 {sortedJudges.map(([email, jId]) => (
                                     <th key={email} className="px-6 py-6 text-center border-l border-white/5 bg-white/[0.02]">
                                         <div className="flex flex-col items-center">
-                                            <span className="text-indigo-400">{jId}</span>
+                                            <span className="text-indigo-400 font-bold text-xs whitespace-nowrap">
+                                                {registeredJudges.find(j => j.email === email)?.name || jId}
+                                            </span>
                                             <span className="text-[8px] opacity-30 lowercase font-normal">{email.split('@')[0]}</span>
                                         </div>
                                     </th>

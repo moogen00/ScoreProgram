@@ -851,7 +851,9 @@ const Scorer = () => {
 
                                         if (compJudges.length === 0) return null;
 
-                                        return compJudges.map((j, jIdx) => {
+                                        const sortedCompJudges = [...compJudges].sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }));
+
+                                        return sortedCompJudges.map((j, jIdx) => {
                                             const vals = pScoresByJudge[j.email] || {};
                                             const judgeTotal = Object.keys(vals).length > 0
                                                 ? Object.values(vals).reduce((s, v) => s + (parseFloat(v) || 0), 0).toFixed(2)
