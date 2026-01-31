@@ -1491,14 +1491,26 @@ const useStore = create((set, get) => ({
                 return onSnapshot(qParts, (snapshot) => {
                     set(state => {
                         const newParticipants = { ...state.participants };
-                        snapshot.docs.forEach(docSnap => {
-                            const p = docSnap.data();
+
+                        snapshot.docChanges().forEach(change => {
+                            const p = change.doc.data();
+                            const docId = change.doc.id;
+                            const pId = p.id || docId.split('_').pop();
                             const catId = p.categoryId;
+
+                            // Ensure array exists
                             if (!newParticipants[catId]) newParticipants[catId] = [];
-                            // Avoid duplicates if multiple snaps
-                            const list = newParticipants[catId].filter(item => item.id !== (p.id || docSnap.id.split('_').pop()));
-                            list.push({ ...p, id: p.id || docSnap.id.split('_').pop() });
-                            newParticipants[catId] = list;
+
+                            if (change.type === "added" || change.type === "modified") {
+                                // Update or Add
+                                const list = newParticipants[catId].filter(item => item.id !== pId);
+                                list.push({ ...p, id: pId });
+                                newParticipants[catId] = list;
+                            }
+                            if (change.type === "removed") {
+                                // Remove
+                                newParticipants[catId] = newParticipants[catId].filter(item => item.id !== pId);
+                            }
                         });
                         return { participants: newParticipants };
                     });
