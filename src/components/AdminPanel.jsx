@@ -752,6 +752,7 @@ const AdminPanel = () => {
                                                             placeholder="Auto"
                                                             type="number"
                                                             min="1"
+                                                            onWheel={(e) => e.target.blur()}
                                                         />
                                                         <button
                                                             onClick={() => setEditPRank('')}
@@ -764,7 +765,7 @@ const AdminPanel = () => {
                                                         </button>
                                                     </div>
                                                     <div className="flex gap-2 mt-1">
-                                                        <button onClick={() => validateAndUpdateParticipant(manageCatId, p.id, editPNumber, editPName, editPRank)} className="text-[10px] bg-amber-600 px-3 py-1 rounded font-bold hover:bg-amber-500 text-white shadow-[0_0_10px_rgba(217,119,6,0.2)]">순위 확정</button>
+                                                        <button onClick={() => validateAndUpdateParticipant(manageCatId, p.id, editPNumber, editPName, editPRank)} className="text-[10px] bg-amber-600 px-3 py-1 rounded font-bold hover:bg-amber-500 text-white shadow-[0_0_10px_rgba(217,119,6,0.2)]">저장</button>
                                                         <button onClick={() => setEditingPId(null)} className="text-[10px] bg-slate-600 px-3 py-1 rounded font-bold hover:bg-slate-500 text-white">취소</button>
                                                     </div>
                                                 </div>
