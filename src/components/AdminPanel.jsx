@@ -278,17 +278,17 @@ const AdminPanel = () => {
 
     // Score Calculation Helper (Pure, no DB rank logic here usually, but we need to list for sorting)
     // Actually, we use this to Generate the Auto-Ranks.
-    const calculateStatsOnly = useCallback((ps, catScores) => {
+    const calculateStatsOnly = useCallback((ps, catScores, compId) => {
         if (!ps || ps.length === 0) return [];
 
-        // Debug Score Data Presence
-        const pIdsWithScores = Object.keys(catScores || {});
-        // console.log(`[Admin] Calculating stats for ${ps.length} participants. Scored ones: ${pIdsWithScores.length}`);
+        // If compId is not provided, try to find it from manageCatId
+        const activeCompId = compId || (competitions.find(c => c.categories?.some(cat => cat.id === manageCatId))?.id);
+        const judges = (activeCompId && judgesByComp[activeCompId]) || [];
+        const totalRegisteredJudgesCount = judges.length;
 
         return ps.map(p => {
             const pScores = catScores[p.id] || {};
             const judgeEmails = Object.keys(pScores);
-            const judgeCount = judgeEmails.length;
 
             // Sum all scores from all judges for this participant
             const totalSum = judgeEmails.reduce((sum, email) => {
@@ -300,14 +300,15 @@ const AdminPanel = () => {
                 return sum + judgeSum;
             }, 0);
 
-            // Important: We need to average across total items across all judges? 
-            // Or average of judge-sums? Standard: (Sum of all items) / (Judge Count) if all items weighted equally
-            // Existing logic: totalSum / judgeCount
-            const average = judgeCount > 0 ? totalSum / judgeCount : 0;
+            // 분모를 '실제 채점한 심사위원 수'가 아닌 '등록된 전체 심사위원 수'로 설정 (스코어보드와 통일)
+            const calculatedAverage = totalRegisteredJudgesCount > 0 ? totalSum / totalRegisteredJudgesCount : 0;
 
-            return { ...p, totalSum, average, judgeCount };
+            // DB에 저장된 totalScore가 있으면 우선 사용 (데이터 동기화 버그 해결)
+            const finalAverage = (p.totalScore !== undefined && p.totalScore !== null) ? p.totalScore : calculatedAverage;
+
+            return { ...p, totalSum, average: finalAverage, judgeCount: judgeEmails.length };
         });
-    }, []);
+    }, [competitions, judgesByComp, manageCatId]);
 
     // -------------------------------------------------------------------------
     // AUTO-RANK DISPLAY LOGIC
@@ -341,23 +342,27 @@ const AdminPanel = () => {
         // 2. 평균 점수 내림차순 정렬 (순위 계산용)
         const sortedByScore = [...list].sort((a, b) => b.average - a.average);
 
-        // 3. 실시간 순위 계산 (1224 방식)
+        // 3. 실시간 순위 계산 (1224 방식 - Strict 2 decimal comparison)
         const realTimeRanks = new Map();
         let curR = 1;
         sortedByScore.forEach((p, idx) => {
-            if (idx > 0 && Math.abs(p.average - sortedByScore[idx - 1].average) > 0.0001) {
-                curR = idx + 1;
+            if (idx > 0) {
+                const prev = sortedByScore[idx - 1].average.toFixed(2);
+                const curr = p.average.toFixed(2);
+                if (prev !== curr) {
+                    curR = idx + 1;
+                }
             }
             realTimeRanks.set(p.id, p.average > 0 ? Math.floor(curR) : '-');
         });
 
         // 표시 순위 결정 및 동점 카운트
         const rankCounts = {}; // For display rank ties
-        const scoreCounts = {}; // For perfect score ties
+        const scoreCounts = {}; // For perfect score ties (Strict toFixed(2))
         list.forEach(p => {
-            const avg = p.average.toFixed(4);
+            const avgStr = p.average.toFixed(2);
             if (p.average > 0) {
-                scoreCounts[avg] = (scoreCounts[avg] || 0) + 1;
+                scoreCounts[avgStr] = (scoreCounts[avgStr] || 0) + 1;
             }
         });
 
@@ -382,10 +387,13 @@ const AdminPanel = () => {
             if (Math.abs(b.average - a.average) > 0.0001) return b.average - a.average;
             return a.number.localeCompare(b.number, undefined, { numeric: true });
         }).map(p => {
-            const scoreStr = p.average.toFixed(4);
+            const scoreStr = p.average.toFixed(2);
+            const rStr = String(p.displayRank);
             return {
                 ...p,
                 rank: p.displayRank,
+                // 스코어보드와 동일하게 '동일 점수(2자리)' 발생 시에만 TIE 표시
+                // 순위가 같더라도 점수가 다르면(수동 순위 입력 등) TIE가 아님
                 isTied: p.average > 0 && scoreCounts[scoreStr] > 1
             };
         });
@@ -407,7 +415,7 @@ const AdminPanel = () => {
             const catPs = participants[cat.id] || [];
             const catScores = scores[cat.id] || {};
             // 종목 내 정렬: Rank/Average 우선 (Admin용)
-            const rankedPs = calculateStatsOnly(catPs, catScores);
+            const rankedPs = calculateStatsOnly(catPs, catScores, manageCompId);
             const sortedPs = rankedPs.sort((a, b) => {
                 const rA = a.finalRank || a.calculatedRank || 999;
                 const rB = b.finalRank || b.calculatedRank || 999;

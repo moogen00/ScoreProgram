@@ -71,7 +71,10 @@ const Leaderboard = () => {
             });
 
             // 평균 계산 (등록된 전체 심사위원 수 기준)
-            const average = totalRegisteredJudgesCount > 0 ? totalSum / totalRegisteredJudgesCount : 0;
+            const calculatedAverage = totalRegisteredJudgesCount > 0 ? totalSum / totalRegisteredJudgesCount : 0;
+            // DB에 저장된 totalScore가 있으면 우선 사용 (데이터 동기화 버그 해결)
+            const average = (p.totalScore !== undefined && p.totalScore !== null) ? p.totalScore : calculatedAverage;
+
             return { ...p, totalSum, average, judgeCount, judgeBreakdown, pScores };
         }).sort((a, b) => { // 수동 확정 순위(finalRank) 및 자동 순위 우선 정렬
             const rA = a.finalRank || a.calculatedRank || 9999;
@@ -80,14 +83,26 @@ const Leaderboard = () => {
             return b.average - a.average; // Use average for tie-breaking if ranks are the same
         });
 
-        // 순위 계산 및 동점자 처리
-        const rankCounts = {};
-        return scored.map(d => ({
-            ...d,
-            rank: d.rank || '-', // Use DB rank
-            isTied: isAdmin && d.rank && rankCounts[d.rank] > 1
-        }));
-    }, [categoryParticipants, categoryScores, judgeMap, isAdmin]);
+        // 순위 및 동점 판별 로직 (Strict 2 decimal comparison)
+        const scoreCounts = {};
+        scored.forEach(d => {
+            const s = d.average.toFixed(2);
+            if (d.average > 0) {
+                scoreCounts[s] = (scoreCounts[s] || 0) + 1;
+            }
+        });
+
+        return scored.map(d => {
+            const r = String(d.finalRank || d.calculatedRank || '-');
+            const s = d.average.toFixed(2);
+            return {
+                ...d,
+                rank: r,
+                // 스코어보드에서도 동일하게 '동일 점수(2자리)' 발생 시에만 TIE 표시
+                isTied: isAdmin && d.average > 0 && scoreCounts[s] > 1
+            };
+        });
+    }, [categoryParticipants, categoryScores, judgeMap, isAdmin, totalRegisteredJudgesCount]);
 
     const finalLeaderboard = leaderboardData;
 

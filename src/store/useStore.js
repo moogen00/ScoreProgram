@@ -1399,12 +1399,15 @@ const useStore = create((set, get) => ({
         scored.sort((a, b) => b.average - a.average);
 
         // 3. 순위 결정 (Standard Competition Ranking: 1224)
-        // 3. 순위 결정 (Standard Competition Ranking: 1224)
         const newRanks = new Map();
         let currentRank = 1;
         scored.forEach((p, idx) => {
-            if (idx > 0 && Math.abs(p.average - scored[idx - 1].average) > 0.0001) {
-                currentRank = idx + 1;
+            if (idx > 0) {
+                const prevScore = scored[idx - 1].average.toFixed(2);
+                const currScore = p.average.toFixed(2);
+                if (prevScore !== currScore) {
+                    currentRank = idx + 1;
+                }
             }
             newRanks.set(p.id, p.average > 0 ? Math.floor(currentRank) : null);
         });
@@ -1413,7 +1416,7 @@ const useStore = create((set, get) => ({
         const batch = writeBatch(db);
         scored.forEach(p => {
             const calcR = newRanks.get(p.id);
-            const totS = parseFloat(p.average.toFixed(4));
+            const totS = parseFloat(p.average.toFixed(2));
 
             // finalRank가 없는(자동 순위) 경우에만 변경 사항 업데이트
             // (사실 calculatedRank와 totalScore는 항상 최신화 해두는 것이 리더보드 등에서 유리함)

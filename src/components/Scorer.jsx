@@ -271,10 +271,11 @@ const Scorer = () => {
     // 개별 참가자 총점 계산 (로컬 상태 기준)
     const calculateTotal = useCallback((pId, scoresObj = localScores) => {
         const pScores = scoresObj[pId] || {};
-        return Object.values(pScores).reduce((sum, val) => {
+        const sum = Object.values(pScores).reduce((sum, val) => {
             const num = parseFloat(val);
             return sum + (isNaN(num) ? 0 : num);
-        }, 0).toFixed(1);
+        }, 0);
+        return sum.toFixed(2);
     }, [localScores]);
 
     // scoringItems 정렬
@@ -287,9 +288,15 @@ const Scorer = () => {
     const getParticipantTotal = useCallback((pId) => {
         const compJudges = judgesByComp?.[currentCompId] || [];
         const judgeCount = compJudges.length;
+        const p = categoryParticipants.find(part => part.id === pId);
 
         if ((isAdmin && !isJudgeForThisComp) || (isSpectator && isLocked)) {
-            // Calculate Average Total from all REGISTRED judges
+            // DB에 저장된 totalScore가 있으면 우선 사용 (데이터 동기화 버그 해결)
+            if (p?.totalScore !== undefined && p?.totalScore !== null) {
+                return p.totalScore;
+            }
+
+            // Calculate Average Total from all REGISTERED judges
             const pScoresByJudge = scores[selectedCategoryId]?.[pId] || {};
 
             let sumOfTotals = 0;
@@ -307,7 +314,7 @@ const Scorer = () => {
             // Judge: Use local/own total
             return parseFloat(calculateTotal(pId));
         }
-    }, [isAdmin, isSpectator, isLocked, isJudgeForThisComp, scores, selectedCategoryId, calculateTotal, currentCompId, judgesByComp]);
+    }, [isAdmin, isSpectator, isLocked, isJudgeForThisComp, scores, selectedCategoryId, calculateTotal, currentCompId, judgesByComp, categoryParticipants]);
 
     // 관리자용 세부 통계 계산 (항목별 평균 및 심사위원별 점수 내역)
     // 관리자용 세부 통계 계산 (항목별 평균 및 심사위원별 점수 내역)
@@ -368,19 +375,24 @@ const Scorer = () => {
             return { ...s, rank: displayRank };
         });
 
-        // 4. 동점자 여부 확인 (최종 결정된 rank 기준)
-        const rankCounts = {};
+        // 4. 동점자 여부 확인 (Strict Score toFixed(2) 기준)
+        const scoreCounts = {};
         finalResults.forEach(p => {
-            if (p.rank && p.rank !== '-') {
-                rankCounts[p.rank] = (rankCounts[p.rank] || 0) + 1;
+            const s = parseFloat(p.scoreForRanking || 0).toFixed(2);
+            if (p.scoreForRanking > 0) {
+                scoreCounts[s] = (scoreCounts[s] || 0) + 1;
             }
         });
 
         const isUserAdmin = currentUser?.role === 'ADMIN' || currentUser?.role === 'ROOT_ADMIN';
-        const finalData = finalResults.map(s => ({
-            ...s,
-            isTied: isUserAdmin ? (s.rank && s.rank !== '-' && rankCounts[s.rank] > 1) : false
-        }));
+        const finalData = finalResults.map(s => {
+            const scoreStr = parseFloat(s.scoreForRanking || 0).toFixed(2);
+            return {
+                ...s,
+                // 스코어보드와 동일하게 '동일 점수(2자리)' 발생 시에만 TIE 표시
+                isTied: isUserAdmin ? (s.scoreForRanking > 0 && scoreCounts[scoreStr] > 1) : false
+            };
+        });
 
         // 5. Stable Sort by Number for Display (Ensures rows don't jump)
         return finalData.sort((a, b) => {
