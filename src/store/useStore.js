@@ -67,6 +67,13 @@ const useStore = create((set, get) => ({
 
         // Clean up all subscriptions on logout
         const { unsubScores, unsubParticipants, unsubJudges } = get();
+        // The following lines seem to be a misplaced list of functions that should be part of the store's top-level actions.
+        // Assuming the intent was to add `clearAllJudges` as a new action to the store,
+        // and the provided snippet was a malformed attempt to show its placement relative to other actions.
+        // Since the other actions (`seedRandomScores`, `clearCompetitionScores`, etc.) are not present in the provided document,
+        // I will add `clearAllJudges` as a new action at the end of the existing actions,
+        // before the `updateScore` action, which is the last action provided in the original content.
+
         if (unsubScores) unsubScores();
         if (unsubParticipants) unsubParticipants();
         if (unsubJudges) unsubJudges();
@@ -1105,6 +1112,95 @@ const useStore = create((set, get) => ({
         }
     },
 
+    clearAllParticipants: async () => {
+        set({ isResetting: true, resetStatus: '참가자 데이터 삭제 중...' });
+        try {
+            const snap = await getDocs(collection(db, 'participants'));
+            const docs = snap.docs;
+            for (let i = 0; i < docs.length; i += 400) {
+                const chunk = docs.slice(i, i + 400);
+                const batch = writeBatch(db);
+                chunk.forEach(docSnap => batch.delete(docSnap.ref));
+                await batch.commit();
+            }
+            set({ participants: {} });
+            console.log('[Store] All participants deleted.');
+        } catch (error) {
+            console.error('[Store] clearAllParticipants failed:', error);
+            throw error;
+        } finally {
+            set({ isResetting: false, resetStatus: '' });
+        }
+    },
+
+    resetAllParticipantScores: async () => {
+        set({ isResetting: true, resetStatus: '순위 및 점수 초기화 중...' });
+        try {
+            const snap = await getDocs(collection(db, 'participants'));
+            const docs = snap.docs;
+            for (let i = 0; i < docs.length; i += 400) {
+                const chunk = docs.slice(i, i + 400);
+                const batch = writeBatch(db);
+                chunk.forEach(docSnap => {
+                    batch.update(docSnap.ref, {
+                        calculatedRank: null,
+                        finalRank: null,
+                        totalScore: 0
+                    });
+                });
+                await batch.commit();
+            }
+            console.log('[Store] All participant scores and ranks reset.');
+        } catch (error) {
+            console.error('[Store] resetAllParticipantScores failed:', error);
+            throw error;
+        } finally {
+            set({ isResetting: false, resetStatus: '' });
+        }
+    },
+
+    clearAllScores: async () => {
+        set({ isResetting: true, resetStatus: '점수 데이터 삭제 중...' });
+        try {
+            const snap = await getDocs(collection(db, 'scores'));
+            const docs = snap.docs;
+            for (let i = 0; i < docs.length; i += 400) {
+                const chunk = docs.slice(i, i + 400);
+                const batch = writeBatch(db);
+                chunk.forEach(docSnap => batch.delete(docSnap.ref));
+                await batch.commit();
+            }
+            set({ scores: {} });
+            console.log('[Store] All scores deleted.');
+        } catch (error) {
+            console.error('[Store] clearAllScores failed:', error);
+            throw error;
+        } finally {
+            set({ isResetting: false, resetStatus: '' });
+        }
+    },
+
+    clearAllJudges: async () => {
+        set({ isResetting: true, resetStatus: '심사위원 데이터 삭제 중...' });
+        try {
+            const snap = await getDocs(collection(db, 'judges'));
+            const docs = snap.docs;
+            for (let i = 0; i < docs.length; i += 400) {
+                const chunk = docs.slice(i, i + 400);
+                const batch = writeBatch(db);
+                chunk.forEach(docSnap => batch.delete(docSnap.ref));
+                await batch.commit();
+            }
+            set({ judgesByComp: {} });
+            console.log('[Store] All judges deleted.');
+        } catch (error) {
+            console.error('[Store] clearAllJudges failed:', error);
+            throw error;
+        } finally {
+            set({ isResetting: false, resetStatus: '' });
+        }
+    },
+
     clearAllData: async () => {
         // Confirmation is handled in AdminPanel.jsx
         // if (!confirm('주의: 데이터베이스의 모든 정보(연도, 종목, 참가자, 점수, 심사위원, 관리자)가 영구적으로 삭제됩니다. 계속하시겠습니까?')) return;
@@ -1656,11 +1752,11 @@ const useStore = create((set, get) => ({
             }
         }
 
-        // Restore selected competition
+        // Restore selected competition/category
         const savedCompId = localStorage.getItem('score_program_selected_comp_id');
-        if (savedCompId) {
-            set({ selectedCompId: savedCompId });
-        }
+        const savedCatId = localStorage.getItem('score_program_selected_cat_id');
+        if (savedCompId) set({ selectedCompId: savedCompId });
+        if (savedCatId) set({ selectedCategoryId: savedCatId });
 
         // 1. Sync Global/Metadata Collections (Small read count)
         onSnapshot(doc(db, 'settings', 'general'), (docSnap) => {

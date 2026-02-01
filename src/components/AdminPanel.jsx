@@ -18,6 +18,7 @@ const AdminPanel = () => {
         addCategory, updateCategory, deleteCategory, moveCategory, sortCategoriesByName, toggleCompetitionLock,
         competitionName, setCompetitionName,
         seedRandomScores, clearCompetitionScores,
+        clearAllParticipants, resetAllParticipantScores, clearAllScores, clearAllJudges,
         exportData, importData, clearAllData, normalizeDatabase, fixLockedProperties,
         currentUser, syncCompetitionData, syncCategoryScores, syncCompetitionScores,
         adminTab, setAdminTab,
@@ -39,8 +40,8 @@ const AdminPanel = () => {
     const [tempJudgeName, setTempJudgeName] = useState('');
 
     // 관리 대상 선택 상태 (대회 및 종목)
-    const [manageCompId, setManageCompId] = useState('');
-    const [manageCatId, setManageCatId] = useState('');
+    const [manageCompId, setManageCompId] = useState(selectedCompId || '');
+    const [manageCatId, setManageCatId] = useState(selectedCategoryId || '');
 
     // Derived state for scoring items
     const managedComp = useMemo(() => competitions.find(c => c.id === manageCompId), [competitions, manageCompId]);
@@ -373,16 +374,21 @@ const AdminPanel = () => {
             return { ...p, displayRank };
         });
 
-        // 참가자 번호순 정렬 및 동점 경고 배지 추가
-        return withDisplayRank.sort((a, b) => a.number.localeCompare(b.number, undefined, { numeric: true }))
-            .map(p => {
-                const scoreStr = p.average.toFixed(4);
-                return {
-                    ...p,
-                    rank: p.displayRank,
-                    isTied: p.average > 0 && scoreCounts[scoreStr] > 1
-                };
-            });
+        // 우선순위 정렬: Rank(순위) 오름차순 -> Average(점수) 내림차순 -> Number(번호) 오름차순
+        return withDisplayRank.sort((a, b) => {
+            const rA = a.displayRank === '-' ? 999 : parseInt(a.displayRank, 10);
+            const rB = b.displayRank === '-' ? 999 : parseInt(b.displayRank, 10);
+            if (rA !== rB) return rA - rB;
+            if (Math.abs(b.average - a.average) > 0.0001) return b.average - a.average;
+            return a.number.localeCompare(b.number, undefined, { numeric: true });
+        }).map(p => {
+            const scoreStr = p.average.toFixed(4);
+            return {
+                ...p,
+                rank: p.displayRank,
+                isTied: p.average > 0 && scoreCounts[scoreStr] > 1
+            };
+        });
     }, [calculateStatsOnly, participants, manageCatId, scores]);
 
     // 현재 관리 중인 종목의 참가자 랭킹 목록 계산
@@ -400,13 +406,17 @@ const AdminPanel = () => {
         (comp.categories || []).forEach(cat => {
             const catPs = participants[cat.id] || [];
             const catScores = scores[cat.id] || {};
-            const rankedPs = getScoredParticipants(catPs, catScores);
+            // 종목 내 정렬: Rank/Average 우선 (Admin용)
+            const rankedPs = calculateStatsOnly(catPs, catScores);
+            const sortedPs = rankedPs.sort((a, b) => {
+                const rA = a.finalRank || a.calculatedRank || 999;
+                const rB = b.finalRank || b.calculatedRank || 999;
+                if (rA !== rB) return rA - rB;
+                if (Math.abs(b.average - a.average) > 0.0001) return b.average - a.average;
+                return a.number.localeCompare(b.number, undefined, { numeric: true });
+            });
 
-            const sortedRankedPs = rankedPs.sort((a, b) =>
-                a.number.localeCompare(b.number, undefined, { numeric: true })
-            );
-
-            sortedRankedPs.forEach(p => {
+            sortedPs.forEach(p => {
                 all.push({ ...p, categoryName: cat.name, categoryId: cat.id });
             });
         });
@@ -1234,6 +1244,79 @@ const AdminPanel = () => {
                                 >
                                     <Lock size={20} /> 잠금 데이터 복구 (Fix Locked Data)
                                 </button>
+                            </div>
+
+                            <div className="mt-8 p-6 bg-slate-500/5 border border-white/10 rounded-2xl">
+                                <div className="flex items-center gap-2 mb-4">
+                                    <Database className="text-cyan-400" />
+                                    <h3 className="text-lg font-bold text-white">데이터 부분 초기화 (Partial Data Reset)</h3>
+                                </div>
+                                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+                                    <button
+                                        onClick={async () => {
+                                            if (confirm('모든 참가자 데이터를 삭제하시겠습니까? (이 작업은 되돌릴 수 없습니다)')) {
+                                                try {
+                                                    await clearAllParticipants();
+                                                    alert('참가자 데이터가 모두 삭제되었습니다.');
+                                                } catch (e) {
+                                                    alert(`오류 발생: ${e.message}`);
+                                                }
+                                            }
+                                        }}
+                                        disabled={isResetting}
+                                        className="py-3 bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 border border-rose-500/30 rounded-xl text-xs font-bold transition-all disabled:opacity-50"
+                                    >
+                                        참가자 데이터 전체 삭제
+                                    </button>
+                                    <button
+                                        onClick={async () => {
+                                            if (confirm('모든 참가자의 실시간 순위 및 점수를 0(Null)으로 초기화하시겠습니까?')) {
+                                                try {
+                                                    await resetAllParticipantScores();
+                                                    alert('순위 및 점수가 초기화되었습니다.');
+                                                } catch (e) {
+                                                    alert(`오류 발생: ${e.message}`);
+                                                }
+                                            }
+                                        }}
+                                        disabled={isResetting}
+                                        className="py-3 bg-amber-500/10 hover:bg-amber-500/20 text-amber-400 border border-amber-500/30 rounded-xl text-xs font-bold transition-all disabled:opacity-50"
+                                    >
+                                        실시간 순위 및 점수 초기화
+                                    </button>
+                                    <button
+                                        onClick={async () => {
+                                            if (confirm('모든 점수 데이터(Scores)를 삭제하시겠습니까? (이 작업은 되돌릴 수 없습니다)')) {
+                                                try {
+                                                    await clearAllScores();
+                                                    alert('점수 데이터가 모두 삭제되었습니다.');
+                                                } catch (e) {
+                                                    alert(`오류 발생: ${e.message}`);
+                                                }
+                                            }
+                                        }}
+                                        disabled={isResetting}
+                                        className="py-3 bg-indigo-500/10 hover:bg-indigo-500/20 text-indigo-400 border border-indigo-500/30 rounded-xl text-xs font-bold transition-all disabled:opacity-50"
+                                    >
+                                        점수 데이터 전체 삭제
+                                    </button>
+                                    <button
+                                        onClick={async () => {
+                                            if (confirm('모든 심사위원 데이터(Judges)를 삭제하시겠습니까? (이 작업은 되돌릴 수 없습니다)')) {
+                                                try {
+                                                    await clearAllJudges();
+                                                    alert('심사위원 데이터가 모두 삭제되었습니다.');
+                                                } catch (e) {
+                                                    alert(`오류 발생: ${e.message}`);
+                                                }
+                                            }
+                                        }}
+                                        disabled={isResetting}
+                                        className="py-3 bg-amber-500/10 hover:bg-amber-500/20 text-amber-400 border border-amber-500/30 rounded-xl text-xs font-bold transition-all disabled:opacity-50"
+                                    >
+                                        심사위원 데이터 전체 삭제
+                                    </button>
+                                </div>
                             </div>
 
                             {import.meta.env.DEV && (
